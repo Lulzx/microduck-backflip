@@ -7619,14 +7619,19 @@ def apply_backflip_assistive_wrench(
     upward_force_n: float = 16.0,
     backward_force_n: float = 0.0,
     backward_pitch_torque_nm: float = 1.40,
+    landing_damping_gain_nm_per_rad_s: float = 0.0,
+    landing_damping_max_nm: float = 0.0,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=("trunk_base",)),
 ) -> torch.Tensor:
-    """Apply a decaying virtual-spotter impulse during launch discovery.
+    """Apply explicit launch and optional post-revolution curriculum harnesses.
 
     Pitch torque follows the body lateral axis, so randomized spawn yaw does
     not change the intended backward direction. Strict evaluation initializes
-    the scale to zero. The step event also writes zero outside the pulse window
-    so MuJoCo never retains a stale wrench.
+    the scale to zero. When configured, the bounded damping torque activates
+    only after a full measured airborne revolution and a valid feet-first
+    landing latch. Both damping parameters default to zero and all harness
+    values are recorded by the evaluator. The step event also writes zero
+    outside active windows so MuJoCo never retains a stale wrench.
     """
     del env_ids  # Step-mode event always applies to all worlds.
     zeros = torch.zeros(env.num_envs, device=env.device)
@@ -7656,6 +7661,25 @@ def apply_backflip_assistive_wrench(
         amplitude.to(dtype) * _BACKFLIP_SIGN * float(backward_pitch_torque_nm)
     )
     torque_w = quat_apply(asset.data.root_link_quat_w, body_torque)
+    if landing_damping_gain_nm_per_rad_s > 0.0 and landing_damping_max_nm > 0.0:
+        landed = getattr(env, "_backflip_landed_latch", None)
+        rotation = getattr(env, "_backflip_max", None)
+        if landed is not None and rotation is not None:
+            harness_active = (
+                landed & (rotation >= 2.0 * math.pi)
+            ).to(dtype) * scale
+            damping_b = (
+                -float(landing_damping_gain_nm_per_rad_s)
+                * asset.data.root_link_ang_vel_b
+            )
+            damping_norm = torch.linalg.vector_norm(damping_b, dim=1, keepdim=True)
+            damping_scale = torch.clamp(
+                float(landing_damping_max_nm)
+                / torch.clamp(damping_norm, min=1.0e-6),
+                max=1.0,
+            )
+            damping_b = damping_b * damping_scale * harness_active.unsqueeze(1)
+            torque_w += quat_apply(asset.data.root_link_quat_w, damping_b)
     asset.write_external_wrench_to_sim(
         forces=force.unsqueeze(1),
         torques=torque_w.unsqueeze(1),
@@ -8250,6 +8274,70 @@ def reset_backflip_mixed_reference_state(
         )
 
 
+def reset_backflip_distillation_state(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    flight_reference_state_path: str,
+    landing_reference_state_path: str,
+    standing_probability: float = 0.2,
+    landing_probability: float = 0.4,
+    standing_z_range: tuple[float, float] = (0.36, 0.37),
+    standing_edge_offset: float = 0.035,
+    landing_min_horizontal_distance: float = 0.0,
+    initial_assist_scale: float = 1.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+):
+    """Distill cube launch, real apex continuation, and touchdown into one actor."""
+    if env_ids is None or len(env_ids) == 0:
+        return
+    if not 0.0 <= standing_probability <= 1.0:
+        raise ValueError("standing_probability must be in [0, 1]")
+    if not 0.0 <= landing_probability <= 1.0:
+        raise ValueError("landing_probability must be in [0, 1]")
+    if standing_probability + landing_probability > 1.0:
+        raise ValueError("standing_probability + landing_probability must be <= 1")
+
+    env_ids = env_ids.to(env.device, dtype=torch.long)
+    sample = torch.rand(len(env_ids), device=env.device)
+    standing_mask = sample < standing_probability
+    landing_mask = sample >= 1.0 - landing_probability
+    flight_mask = ~(standing_mask | landing_mask)
+    standing_ids = env_ids[standing_mask]
+    flight_ids = env_ids[flight_mask]
+    landing_ids = env_ids[landing_mask]
+
+    if len(standing_ids) > 0:
+        reset_backflip_state(
+            env,
+            standing_ids,
+            asset_cfg=asset_cfg,
+            standing_prob=1.0,
+            crouch_prob=0.0,
+            midflight_prob=0.0,
+            recovery_prob=0.0,
+            standing_z_range=standing_z_range,
+            standing_edge_offset=standing_edge_offset,
+            initial_assist_scale=initial_assist_scale,
+            landing_min_horizontal_distance=landing_min_horizontal_distance,
+        )
+    if len(flight_ids) > 0:
+        reset_backflip_reference_state(
+            env,
+            flight_ids,
+            reference_state_path=flight_reference_state_path,
+            landing_min_horizontal_distance=landing_min_horizontal_distance,
+            asset_cfg=asset_cfg,
+        )
+    if len(landing_ids) > 0:
+        reset_backflip_landing_reference_state(
+            env,
+            landing_ids,
+            reference_state_path=landing_reference_state_path,
+            landing_min_horizontal_distance=landing_min_horizontal_distance,
+            asset_cfg=asset_cfg,
+        )
+
+
 def backflip_rotation_progress(
     env: ManagerBasedRlEnv,
     target_angle: float = 2 * math.pi,
@@ -8265,6 +8353,21 @@ def backflip_rotation_progress(
     delta = torch.clamp(delta, max=max_paid_rate * env.step_dt)
     env._backflip_paid = torch.maximum(paid, frontier)
     return delta / (env.step_dt * target_angle)
+
+
+def backflip_rotation_reached(
+    env: ManagerBasedRlEnv,
+    target_angle: float = math.pi,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """End a launch lesson as soon as it reaches its airborne apex gate."""
+    asset: Entity = env.scene[asset_cfg.name]
+    _update_backflip_state(env, asset)
+    return (
+        env._backflip_airborne_latch
+        & ~env._backflip_flight_ended_latch
+        & (env._backflip_max >= float(target_angle))
+    )
 
 
 def backflip_takeoff_progress(

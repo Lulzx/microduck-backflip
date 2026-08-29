@@ -10,6 +10,10 @@ from mjlab_microduck.tasks.backflip_actions import (
 )
 from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     MicroduckBackflipRlCfg,
+    MicroduckBackflipCubeLaunchRlCfg,
+    MicroduckBackflipLaunch650FloorRlCfg,
+    MicroduckBackflipLaunch650MatLandingRlCfg,
+    MicroduckBackflipLaunch650MatApproachRlCfg,
     make_microduck_backflip_env_cfg,
     make_microduck_backflip_recovery_env_cfg,
     make_microduck_backflip_touchdown_env_cfg,
@@ -19,7 +23,18 @@ from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     make_microduck_backflip_early_reference_env_cfg,
     make_microduck_backflip_mat_reference_env_cfg,
     make_microduck_backflip_mat_landing_reference_env_cfg,
+    make_microduck_backflip_launch650_mat_landing_env_cfg,
+    make_microduck_backflip_launch650_mat_approach_env_cfg,
     make_microduck_backflip_mat_mixed_reference_env_cfg,
+    make_microduck_backflip_mat_distillation_env_cfg,
+    make_microduck_backflip_soft_mat_distillation_env_cfg,
+    make_microduck_backflip_mat_current_mixed_env_cfg,
+    make_microduck_backflip_mat_current_reference_env_cfg,
+    make_microduck_backflip_current_floor_reference_env_cfg,
+    make_microduck_backflip_current_floor_mixed_env_cfg,
+    make_microduck_backflip_current_floor_distillation_env_cfg,
+    make_microduck_backflip_launch650_floor_reference_env_cfg,
+    make_microduck_backflip_cube_launch_env_cfg,
 )
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
     BackflipMatTerrainCfg,
@@ -280,6 +295,166 @@ def test_mat_mixed_reference_rehearses_flight_and_exact_landing():
     assert cfg.rewards["backflip_success"].weight == 800.0
 
 
+def test_mat_distillation_progressively_adds_complete_cube_starts():
+    cfg = make_microduck_backflip_mat_distillation_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    assert reset.func is microduck_mdp.reset_backflip_distillation_state
+    assert reset.params["standing_probability"] == 0.20
+    assert reset.params["landing_probability"] == 0.40
+    assert reset.params["initial_assist_scale"] == 1.0
+    stages = cfg.curriculum["backflip_reference_spawn_mix"].params["param_stages"]
+    assert stages[0]["params"] == {
+        "standing_probability": 0.20,
+        "landing_probability": 0.40,
+    }
+    assert stages[-1]["params"] == {
+        "standing_probability": 0.50,
+        "landing_probability": 0.25,
+    }
+
+
+def test_soft_mat_curriculum_reduces_drop_and_softens_contact():
+    base = make_microduck_backflip_mat_distillation_env_cfg()
+    soft = make_microduck_backflip_soft_mat_distillation_env_cfg()
+    base_mat = base.scene.terrain.terrain_generator.sub_terrains["backflip_mat"]
+    soft_mat = soft.scene.terrain.terrain_generator.sub_terrains["backflip_mat"]
+
+    assert soft_mat.landing_mat_height > base_mat.landing_mat_height
+    assert soft_mat.landing_mat_height < PEDESTAL_HEIGHT
+    assert soft_mat.mat_contact_time_s > base_mat.mat_contact_time_s
+    assert soft.rewards["backflip_landing"].params["target_height"] > base.rewards[
+        "backflip_landing"
+    ].params["target_height"]
+
+
+def test_current_mat_reference_uses_latest_cube_actor_apex_states():
+    cfg = make_microduck_backflip_mat_current_mixed_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    path = Path(reset.params["flight_reference_state_path"])
+    payload = json.loads(path.read_text())
+    assert path.name == "pedestal_floor_model600_angle180_seed45.json"
+    assert len(payload["snapshots"]) >= 60
+    assert min(row["rotation_rad"] for row in payload["snapshots"]) >= math.pi
+
+    pure = make_microduck_backflip_mat_current_reference_env_cfg()
+    pure_reset = pure.events["set_backflip_state"]
+    assert pure_reset.func is microduck_mdp.reset_backflip_reference_state
+    assert Path(pure_reset.params["reference_state_path"]) == path
+
+
+def test_current_floor_curriculum_matches_latest_cube_trajectory_ends():
+    cfg = make_microduck_backflip_current_floor_mixed_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    assert reset.func is microduck_mdp.reset_backflip_mixed_reference_state
+    flight_path = Path(reset.params["flight_reference_state_path"])
+    landing_path = Path(reset.params["landing_reference_state_path"])
+    landing = json.loads(landing_path.read_text())
+    assert flight_path.name == "pedestal_floor_model600_angle180_seed45.json"
+    assert landing_path.name == "pedestal_floor_model600_landing_seed45.json"
+    assert landing["capture_event"] == "landing"
+    assert len(landing["snapshots"]) >= 20
+    assert max(row["qpos_local"][2] for row in landing["snapshots"]) < 0.25
+    assert cfg.rewards["backflip_landing"].params["target_height"] < 0.15
+
+    pure = make_microduck_backflip_current_floor_reference_env_cfg()
+    assert (
+        Path(pure.events["set_backflip_state"].params["reference_state_path"])
+        == flight_path
+    )
+
+
+def test_current_floor_distillation_adds_cube_starts_without_terrain_mismatch():
+    cfg = make_microduck_backflip_current_floor_distillation_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    assert reset.func is microduck_mdp.reset_backflip_distillation_state
+    assert reset.params["standing_probability"] == 0.20
+    assert reset.params["landing_probability"] == 0.40
+    assert reset.params["initial_assist_scale"] == 1.0
+    assert "floor" in Path(reset.params["flight_reference_state_path"]).name
+    assert "floor" in Path(reset.params["landing_reference_state_path"]).name
+    assert cfg.rewards["backflip_landing"].params["target_height"] < 0.15
+    stages = cfg.curriculum["backflip_reference_spawn_mix"].params["param_stages"]
+    assert stages[0]["step"] == 690 * 24
+    assert stages[-1]["params"] == {
+        "standing_probability": 0.50,
+        "landing_probability": 0.25,
+    }
+
+
+def test_launch650_floor_reference_uses_exact_handoff_distribution():
+    cfg = make_microduck_backflip_launch650_floor_reference_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    path = Path(reset.params["reference_state_path"])
+
+    assert path.name == "pedestal_floor_launch650_nominal_angle160_seed45.json"
+    assert path.exists()
+    assert reset.func is microduck_mdp.reset_backflip_reference_state
+    assert MicroduckBackflipLaunch650FloorRlCfg.experiment_name.endswith(
+        "launch650_floor"
+    )
+    assert MicroduckBackflipLaunch650FloorRlCfg.algorithm.learning_rate <= 1.0e-4
+    assert MicroduckBackflipLaunch650FloorRlCfg.algorithm.entropy_coef <= 0.001
+
+
+def test_launch650_mat_landing_uses_exact_composed_touchdowns():
+    cfg = make_microduck_backflip_launch650_mat_landing_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    path = Path(reset.params["reference_state_path"])
+    capture = json.loads(path.read_text())
+
+    assert (
+        path.name
+        == "mat_launch650_mat510_landing_t1p50_angle180_seed45_warp1.json"
+    )
+    assert reset.func is microduck_mdp.reset_backflip_landing_reference_state
+    assert capture["capture_event"] == "landing"
+    assert capture["seed"] == 45
+    assert len(capture["snapshots"]) >= 4
+    assert MicroduckBackflipLaunch650MatLandingRlCfg.algorithm.learning_rate <= 1e-4
+
+
+def test_launch650_mat_approach_uses_deterministic_precontact_states():
+    cfg = make_microduck_backflip_launch650_mat_approach_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    path = Path(reset.params["reference_state_path"])
+    capture = json.loads(path.read_text())
+
+    assert path.name == "mat_launch650_mat510_angle260_t1p50_seeds40-47_warp1.json"
+    assert reset.func is microduck_mdp.reset_backflip_reference_state
+    assert capture["capture_event"] == "angle"
+    assert capture["source_seeds"] == list(range(40, 48))
+    assert len(capture["snapshots"]) >= 100
+    assert MicroduckBackflipLaunch650MatApproachRlCfg.algorithm.learning_rate <= 1e-4
+
+
+def test_cube_launch_specialist_breaks_the_assist_authority_deadlock():
+    cfg = make_microduck_backflip_cube_launch_env_cfg()
+    reset = cfg.events["set_backflip_state"].params
+    assert reset["standing_prob"] == 1.0
+    assert reset["midflight_prob"] == 0.0
+    assert cfg.actions["joint_pos"].min_assisted_authority == 0.20
+    actuator = cfg.scene.entities["robot"].articulation.actuators[0]
+    assert actuator.vin_range == (8.2, 8.2)
+    assert actuator.vin_drop_gain_range == (0.0, 0.0)
+    assert actuator.delay_min_lag == actuator.delay_max_lag == 3
+    assert actuator.delay_per_env_phase is False
+    assert cfg.commands["twist"].ranges.lin_vel_x == (0.0, 0.0)
+    assert cfg.commands["twist"].rel_forward_envs == 0.0
+    assert cfg.events["foot_friction"].params["ranges"] == (1.0, 1.0)
+    assert cfg.events["set_backflip_state"].params["joint_noise_std"] == 0.0
+    assert "com_range" not in cfg.curriculum
+    assert (
+        cfg.terminations["backflip_launch_apex"].func
+        is microduck_mdp.backflip_rotation_reached
+    )
+    assert cfg.terminations["backflip_launch_apex"].params["target_angle"] == math.pi
+    assert cfg.rewards["backflip_rotation"].params["target_angle"] == math.pi
+    assert cfg.rewards["backflip_rotation"].weight > 0.0
+    assert cfg.rewards["backflip_landing"].weight == 0.0
+    assert MicroduckBackflipCubeLaunchRlCfg.algorithm.learning_rate <= 1.0e-4
+    assert MicroduckBackflipCubeLaunchRlCfg.algorithm.entropy_coef <= 0.001
+
+
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():
     cfg = make_microduck_backflip_env_cfg()
     params = cfg.rewards["backflip_rotation"].params
@@ -395,3 +570,17 @@ def test_evaluator_removes_the_spawn_curriculum_before_forcing_standing():
     assert reset.params["crouch_prob"] == 0.0
     assert reset.params["midflight_prob"] == 0.0
     assert "backflip_spawn_mix" not in cfg.curriculum
+
+
+def test_evaluator_forces_distillation_reset_to_standing_with_valid_params():
+    from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
+        configure_backflip_standing_eval,
+    )
+
+    cfg = make_microduck_backflip_current_floor_distillation_env_cfg(play=True)
+    configure_backflip_standing_eval(cfg)
+    reset = cfg.events["set_backflip_state"]
+    assert reset.params["standing_probability"] == 1.0
+    assert reset.params["landing_probability"] == 0.0
+    assert "standing_prob" not in reset.params
+    assert "backflip_reference_spawn_mix" not in cfg.curriculum

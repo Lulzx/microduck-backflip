@@ -77,7 +77,18 @@ from .microduck_backflip_env_cfg import (
     make_microduck_backflip_early_reference_env_cfg,
     make_microduck_backflip_mat_reference_env_cfg,
     make_microduck_backflip_mat_landing_reference_env_cfg,
+    make_microduck_backflip_launch650_mat_landing_env_cfg,
+    make_microduck_backflip_launch650_mat_approach_env_cfg,
     make_microduck_backflip_mat_mixed_reference_env_cfg,
+    make_microduck_backflip_mat_distillation_env_cfg,
+    make_microduck_backflip_soft_mat_distillation_env_cfg,
+    make_microduck_backflip_mat_current_mixed_env_cfg,
+    make_microduck_backflip_mat_current_reference_env_cfg,
+    make_microduck_backflip_current_floor_reference_env_cfg,
+    make_microduck_backflip_current_floor_mixed_env_cfg,
+    make_microduck_backflip_current_floor_distillation_env_cfg,
+    make_microduck_backflip_launch650_floor_reference_env_cfg,
+    make_microduck_backflip_cube_launch_env_cfg,
     MicroduckBackflipRlCfg,
     MicroduckBackflipRecoveryRlCfg,
     MicroduckBackflipTouchdownRlCfg,
@@ -87,7 +98,15 @@ from .microduck_backflip_env_cfg import (
     MicroduckBackflipEarlyReferenceRlCfg,
     MicroduckBackflipMatReferenceRlCfg,
     MicroduckBackflipMatLandingReferenceRlCfg,
+    MicroduckBackflipLaunch650MatLandingRlCfg,
+    MicroduckBackflipLaunch650MatApproachRlCfg,
     MicroduckBackflipMatMixedReferenceRlCfg,
+    MicroduckBackflipMatDistillationRlCfg,
+    MicroduckBackflipMatCurrentMixedRlCfg,
+    MicroduckBackflipCurrentFloorRlCfg,
+    MicroduckBackflipCurrentFloorDistillationRlCfg,
+    MicroduckBackflipLaunch650FloorRlCfg,
+    MicroduckBackflipCubeLaunchRlCfg,
 )
 from .backlash import make_backlash_variant
 
@@ -172,12 +191,106 @@ register_mjlab_task(
     runner_cls=MicroduckOnPolicyRunner,
 )
 
+register_mjlab_task(
+    task_id="Mjlab-BackflipLaunch650MatLanding-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_launch650_mat_landing_env_cfg(),
+    play_env_cfg=make_microduck_backflip_launch650_mat_landing_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipLaunch650MatLandingRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipLaunch650MatApproach-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_launch650_mat_approach_env_cfg(),
+    play_env_cfg=make_microduck_backflip_launch650_mat_approach_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipLaunch650MatApproachRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
 # One actor rehearses both the real apex continuation and exact mat touchdown.
 register_mjlab_task(
     task_id="Mjlab-BackflipReferenceMatMixed-Pedestal-MicroDuck",
     env_cfg=make_microduck_backflip_mat_mixed_reference_env_cfg(),
     play_env_cfg=make_microduck_backflip_mat_mixed_reference_env_cfg(play=True),
     rl_cfg=MicroduckBackflipMatMixedReferenceRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Full distillation: standing cube starts plus verified apex/landing lessons.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceMatDistill-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_mat_distillation_env_cfg(),
+    play_env_cfg=make_microduck_backflip_mat_distillation_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatDistillationRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceSoftMatDistill-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_soft_mat_distillation_env_cfg(),
+    play_env_cfg=make_microduck_backflip_soft_mat_distillation_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatDistillationRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Iterative-imitation slice captured from the latest standing-cube actor.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceMatCurrent-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_mat_current_mixed_env_cfg(),
+    play_env_cfg=make_microduck_backflip_mat_current_mixed_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatCurrentMixedRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceMatCurrentFlight-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_mat_current_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_mat_current_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatCurrentMixedRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceCurrentFloor-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_current_floor_mixed_env_cfg(),
+    play_env_cfg=make_microduck_backflip_current_floor_mixed_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipCurrentFloorRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceCurrentFloorFlight-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_current_floor_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_current_floor_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipCurrentFloorRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceLaunch650Floor-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_launch650_floor_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_launch650_floor_reference_env_cfg(
+        play=True
+    ),
+    rl_cfg=MicroduckBackflipLaunch650FloorRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceCurrentFloorDistill-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_current_floor_distillation_env_cfg(),
+    play_env_cfg=make_microduck_backflip_current_floor_distillation_env_cfg(
+        play=True
+    ),
+    rl_cfg=MicroduckBackflipCurrentFloorDistillationRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipLaunch-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_cube_launch_env_cfg(),
+    play_env_cfg=make_microduck_backflip_cube_launch_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipCubeLaunchRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

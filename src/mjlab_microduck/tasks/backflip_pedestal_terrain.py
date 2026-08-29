@@ -87,6 +87,8 @@ class BackflipMatTerrainCfg(SubTerrainCfg):
     landing_mat_height: float = LANDING_MAT_HEIGHT
     floor_thickness: float = 0.10
     mat_contact_time_s: float = 0.06
+    mat_contact_damping: float = 1.0
+    mat_slide_friction: float = 1.0
 
     def function(
         self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -117,8 +119,8 @@ class BackflipMatTerrainCfg(SubTerrainCfg):
                 self.landing_mat_height / 2.0,
             ),
             pos=(center_x, center_y, self.landing_mat_height / 2.0),
-            friction=(1.0, 0.005, 0.0001),
-            solref=(self.mat_contact_time_s, 1.0),
+            friction=(self.mat_slide_friction, 0.005, 0.0001),
+            solref=(self.mat_contact_time_s, self.mat_contact_damping),
             solimp=(0.85, 0.95, 0.001, 0.5, 2.0),
         )
         pedestal = body.add_geom(

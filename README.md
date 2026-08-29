@@ -195,6 +195,15 @@ safety gate. The append-oriented
 every experiment's hypothesis, exact command, checkpoint evidence, failure
 reason, and next decision.
 
+Current milestone (2026-08-30): the first deterministic **assisted** complete
+cube-to-mat attempt rotates 361.22 degrees, lands feet-first, and holds the
+strict landing envelope for 0.92 s. It uses a 16 N / 1.50 Nm launch pulse and
+a bounded 0.16 Nms/rad, 0.40 Nm post-revolution damping harness; it is not an
+autonomous or physical-robot result. The exact checkpoints, evaluation, trace,
+and [4 s replay](results/videos/v88-cube-mat-harness-success-seed45-env28-warp1/backflip-model_650-standing-step-0.mp4)
+are committed under `results/`. Assistance annealing and robustness training
+remain active work.
+
 CPU-only config-invariant and reward-function regression tests — they lock in
 joint-index mappings, reward sign conventions, and NaN guards.
 

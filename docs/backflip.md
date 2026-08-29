@@ -124,12 +124,21 @@ MicroDuck` trains one actor on a 50/50 mixture of the real apex states and
 those exact touchdown states so approach and recovery gradients can be
 distilled into a single policy before returning to full cube starts.
 
-Current verified curriculum milestone: mixed-training checkpoint 510,
-evaluated with `WARP_NUM_THREADS=1`, has 2/64 strict successes at seed 45.
-The best completes 369.49 degrees and holds every landing predicate for 2.02
-seconds. This is reproducible apex-to-compliant-mat evidence. It is explicitly
-not a complete takeoff from the cube, an unassisted flat-ground result, or
-physical-robot evidence.
+The earlier verified curriculum milestone is mixed-training checkpoint 510:
+when reset at the captured 180-degree apex state, it has 2/64 strict successes
+at deterministic seed 45 and its best holds for 2.02 s. The current complete
+maneuver milestone composes cube-launch checkpoint 650 with that recovery
+actor. From ordinary standing cube starts it produces 64/64 takeoffs, 6/64
+full revolutions, 5/64 full-revolution feet-first landings, and one strict
+stable landing in the 64-world seed-45 battery. Environment 28 rotates 361.22
+degrees and holds the strict envelope for 0.92 s.
+
+That complete maneuver remains explicitly assisted. It uses the discovery
+launch pulse (16 N upward and 1.50 Nm backward from 0.30 to 0.40 s) plus a
+post-360 bounded pitch-damping harness (0.16 Nms/rad, capped at 0.40 Nm).
+Neither actor alone has passed a standing-start, zero-assistance battery. This
+is therefore a reproducible curriculum bridge, not an autonomous, flat-ground,
+or physical-robot result.
 
 ## Reproduce training
 
@@ -201,6 +210,28 @@ uv run python scripts/eval_backflip.py \
   --output results/pedestal_eval_seed42.json
 ```
 
+Reproduce the current assisted cube-to-mat milestone using only committed
+artifacts:
+
+```bash
+WARP_NUM_THREADS=1 PYTHONPATH=src uv run --python .venv/bin/python --no-sync \
+  scripts/eval_backflip.py \
+  results/checkpoints/v88-assisted-cube-to-mat-model650/model_650.pt \
+  --task-id Mjlab-BackflipReferenceMatDistill-Pedestal-MicroDuck \
+  --num-envs 64 --seed 45 --start-mode standing --assist-scale 1 \
+  --assist-force-n 16 --assist-torque-nm 1.50 \
+  --landing-damping-gain 0.16 --landing-damping-max-nm 0.40 \
+  --recovery-checkpoint results/checkpoints/v44-unified-model510/model_510.pt \
+  --recovery-switch-mode approach --recovery-phase-mode local \
+  --recovery-approach-angle-deg 180 --recovery-approach-tilt-deg 180 \
+  --recovery-approach-height-m 1.0
+```
+
+The two harness options default to zero. Any nonzero value must be printed in
+the result JSON and in the accompanying claim. Autonomous acceptance always
+sets `--assist-scale 0`, `--landing-damping-gain 0`, and
+`--landing-damping-max-nm 0`.
+
 Before export, require three 128-episode batteries with seeds 42, 123, and 2026:
 
 - takeoff rate at least 99%;
@@ -256,6 +287,14 @@ Prerequisites:
 - have one operator on the trigger and another on an immediate torque-off;
 - begin with a single attempt, then inspect hardware and logs before any
   repeat. Never chain the trigger during bring-up.
+
+The v88 assisted checkpoint is **not eligible for hardware deployment**. Its
+external launch impulse and landing-damping harness are simulator curriculum
+devices with no validated physical counterpart. Do not approximate them by
+holding, throwing, tether-pulling, increasing servo gain, or manually applying
+torque. Hardware eligibility begins only after the same exported actor passes
+all zero-assistance nominal and backlash batteries above, with no policy swap
+or evaluator-only wrench.
 
 Runtime compatibility must be resolved explicitly. The training policy is
 unfiltered, while the current `microduck` daemon applies its global head/leg

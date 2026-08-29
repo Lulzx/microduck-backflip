@@ -7,23 +7,24 @@ task definition and safety gates live in [backflip.md](backflip.md); paper
 analysis and first-principles decomposition live in
 [backflip_research.md](backflip_research.md).
 
-## Status snapshot — 2026-08-29 17:16 IST
+## Status snapshot — 2026-08-30 00:13 IST
 
 - Goal: standing start, one uninterrupted airborne backward revolution,
   feet-first contact, then a strict 0.5 s stable hold in simulation.
 - Hardware claim: **none**. No physical backflip has been attempted or proven.
-- Best strict standing-start checkpoint: v15 `model_1175`; 128/128 takeoffs,
-  mean 145.17 degrees and maximum 274 degrees, no 300-degree flight and no
-  landing. Evidence: `results/threaded_v15_model1175_strict_seed42.json`.
-- Best assisted teacher distribution: untrained 5%-authority phase residual;
-  64/64 takeoffs, 64/64 >=300 degrees, 46/64 >=340 degrees, 46/64 first ground
-  contacts on feet, 33/64 landing latches, and 0/64 strict stable holds.
-  Evidence: `results/phase_residual_authority5_model0_assisted_seed42.json`.
-- Current bottleneck: impact recovery. v25 recovery-start checkpoints 25, 50,
-  and 75 all produced 0/32 strict stable holds.
-- Active run: v26 stage-wise landing, 256 worlds, CPU, seed 42, 600 iterations.
-  Run directory:
-  `logs/rsl_rl/microduck_backflip/2026-08-29_17-14-12_research-efgcl-v26-stagewise-landing-256`.
+- Best zero-assistance standing-start checkpoint remains unsolved: no actor has
+  passed a complete 360-degree, 0.50 s stable landing battery from the cube or
+  flat ground.
+- Best complete assisted result: v88 launch `model_650` plus v44 recovery
+  `model_510`, 16 N / 1.50 Nm launch pulse, and a post-360 damper of
+  0.16 Nms/rad capped at 0.40 Nm. Deterministic seed 45 produced 64/64
+  takeoffs, 6/64 full revolutions, 5/64 full-revolution feet-first contacts,
+  and 1/64 strict stable landings. Environment 28 held for 0.92 s. Evidence:
+  `results/research_cube_to_mat_harness_v88_g0p16_m0p40_64_seed45_warp1.json`.
+- Current bottleneck: distill the successful live approach/contact trajectory
+  into one actor while annealing the landing damper and then the launch pulse.
+- Active status: evidence packaging and deterministic verification complete;
+  assistance-annealing curriculum is next.
 
 ## Reproducibility envelope
 
@@ -775,6 +776,85 @@ Its 64-world evaluation and exact per-step trace are stored alongside the v44
 results. The 1280x720, 50 fps, 4.0 s H.264 replay was rerun with one Warp
 thread and reproduced the same 2.02 s strict hold. It begins at the captured
 180-degree apex state, so it proves apex-to-mat continuation only.
+
+**2026-08-29 21:05 to 2026-08-30 00:13 IST — v45-v88 standing-cube
+distillation, live handoff diagnosis, and bounded landing harness.**
+
+- Hypothesis: the solved apex-to-mat actor could be joined to a standing-cube
+  launch actor by matching the handoff's physical-state and observation-phase
+  distributions, then using a very small curriculum harness only for the
+  remaining post-contact angular energy.
+- v45-v54 returned the mat curriculum to standing cube starts and swept
+  checkpoint continuation, action standard deviation, reward balance, and
+  captured-state mixtures. The best direct actor still produced at most a
+  0.16 s strict hold on the rigid lower floor; the low-variance mat
+  distillation continuation peaked at 0.02 s. Neither was promoted.
+- v55-v63 isolated launch checkpoint 650. With the 16 N / 1.50 Nm discovery
+  pulse it produced 64/64 takeoffs; 6/64 completed 360 degrees and 5/64 made a
+  full-revolution feet-first contact. A direct policy hierarchy still produced
+  no 0.50 s stable hold. This established that complete exploration existed
+  and moved the bottleneck to the live approach/recovery boundary.
+- v64-v78 captured exact model-650 approach and contact distributions and
+  trained/evaluated approach, exact-contact, mixed, floor, raised-mat, and
+  policy-blend variants. Exact-contact reset performance did not transfer to
+  the live trajectory because restoring `qpos`/`qvel` does not reproduce all
+  warm-started contact-solver state. The evaluator also incorrectly rebased
+  every specialist to local time. It now supports explicit `global` or `local`
+  phase conventions; the model-510 exact-touchdown actor requires local phase.
+  Correcting this mismatch improved the handoff but did not independently
+  cross 0.50 s.
+- v79-v86 swept mat height/contact parameters, handoff angles, blending,
+  delayed policy switching, and surface friction. These changed which worlds
+  survived impact but produced no reproducible strict success. The rejected
+  22 cm soft mat was worse than the 18 cm mat and is not promoted.
+- v87 introduced an evaluator-visible post-360 pitch damper as a curriculum
+  harness. It is disabled by default, activates only after a measured full
+  airborne revolution, opposes pitch rate, and is capped in torque. Gains at
+  or below 0.10 Nms/rad did not produce a strict success in the tested seed-45
+  battery.
+- v88 used gain 0.16 Nms/rad capped at 0.40 Nm. In 64 deterministic standing
+  starts (`WARP_NUM_THREADS=1`, seed 45), all 64 took off, 6 reached 360
+  degrees, 5 landed feet-first after a full revolution, and environment 28
+  passed the strict 0.50 s gate. It rotated 361.215 degrees, held every strict
+  predicate for 0.92 s, and retained upright landing posture for 1.40 s. An
+  exact single-thread replay reproduced the 0.92 s hold.
+
+Exact v88 evaluation and replay command:
+
+```bash
+WARP_NUM_THREADS=1 PYTHONPATH=src uv run --python .venv/bin/python --no-sync \
+  scripts/eval_backflip.py \
+  results/checkpoints/v88-assisted-cube-to-mat-model650/model_650.pt \
+  --task-id Mjlab-BackflipReferenceMatDistill-Pedestal-MicroDuck \
+  --num-envs 64 --seed 45 --start-mode standing --assist-scale 1 \
+  --assist-force-n 16 --assist-torque-nm 1.50 \
+  --landing-damping-gain 0.16 --landing-damping-max-nm 0.40 \
+  --recovery-checkpoint results/checkpoints/v44-unified-model510/model_510.pt \
+  --recovery-switch-mode approach --recovery-phase-mode local \
+  --recovery-approach-angle-deg 180 --recovery-approach-tilt-deg 180 \
+  --recovery-approach-height-m 1.0 \
+  --render-env-index 28 \
+  --video-dir results/videos/v88-cube-mat-harness-success-seed45-env28-warp1
+```
+
+Evidence:
+
+- full battery: `results/research_cube_to_mat_harness_v88_g0p16_m0p40_64_seed45_warp1.json`;
+- replay evaluation and trace:
+  `results/videos/v88-cube-mat-harness-success-seed45-env28-warp1/`;
+- verified video:
+  `results/videos/v88-cube-mat-harness-success-seed45-env28-warp1/backflip-model_650-standing-step-0.mp4`
+  (H.264/yuv420p, 1280x720, 50 fps, 4.0 s);
+- launch checkpoint and frozen configuration:
+  `results/checkpoints/v88-assisted-cube-to-mat-model650/`;
+- recovery checkpoint: `results/checkpoints/v44-unified-model510/`.
+
+Decision: the hypothesis is supported only as an assisted curriculum bridge.
+The complete cube-to-mat sequence is now observable and reproducible, but its
+1/64 success rate and nonzero launch/landing wrenches fail autonomous
+acceptance. Next, train on the live v88 approach distribution while annealing
+the post-360 damper, then anneal the launch pulse and repeat multi-seed and
+backlash batteries. This result is not eligible for physical deployment.
 
 ## Logging protocol for subsequent entries
 

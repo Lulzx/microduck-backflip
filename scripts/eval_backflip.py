@@ -15,16 +15,15 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
+
 from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     configure_backflip_standing_eval,
 )
-
 
 TASK_ID = "Mjlab-Backflip-Flat-MicroDuck"
 STABLE_HOLD_S = 0.5
@@ -68,19 +67,24 @@ def _finite_time_summary(x: torch.Tensor) -> dict[str, float | None]:
 
 
 def _specialist_observation(
-    obs: torch.Tensor, elapsed_steps: torch.Tensor, step_dt: float
+    obs: torch.Tensor,
+    elapsed_steps: torch.Tensor,
+    step_dt: float,
+    *,
+    local_phase: bool,
 ) -> torch.Tensor:
-    """Rebase the two backflip context slots to a specialist-local episode.
+    """Match the context convention used by the specialist's reset task.
 
-    Actor indices 55:61 are the reused body-command slots. Specialists were
-    trained with their own phase starting at zero and without the launch
-    spotter, so forwarding the parent episode's phase/assist values is an
-    observation-distribution error even though physical state is shared.
+    Actor indices 55:61 are the reused body-command slots. Captured airborne
+    reference tasks retain the global maneuver phase; exact-touchdown tasks
+    start a local phase. Both disable the launch spotter. Applying one phase
+    convention to both kinds of policy is an observation-distribution error.
     """
     specialist_obs = obs.clone()
-    elapsed_s = elapsed_steps.to(specialist_obs.dtype) * float(step_dt)
-    x = elapsed_s / 0.30
-    specialist_obs[:, 55] = x.pow(3) / (1.0 + x.pow(3))
+    if local_phase:
+        elapsed_s = elapsed_steps.to(specialist_obs.dtype) * float(step_dt)
+        x = elapsed_s / 0.30
+        specialist_obs[:, 55] = x.pow(3) / (1.0 + x.pow(3))
     specialist_obs[:, 56] = 0.0
     return specialist_obs
 
@@ -110,6 +114,15 @@ def evaluate(
     snapshot_output: Path | None = None,
     snapshot_angle_deg: float = 260.0,
     snapshot_event: str = "angle",
+    recovery_blend_s: float = 0.0,
+    recovery_phase_mode: str = "auto",
+    mat_height_m: float | None = None,
+    mat_contact_time_s: float | None = None,
+    mat_contact_damping: float | None = None,
+    mat_friction: float | None = None,
+    post_landing_delay_s: float = 0.0,
+    landing_damping_gain: float = 0.0,
+    landing_damping_max_nm: float = 0.0,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -117,6 +130,34 @@ def evaluate(
     agent_cfg = load_rl_cfg(task_id)
     env_cfg.scene.num_envs = num_envs
     env_cfg.seed = seed
+    terrain_generator = getattr(env_cfg.scene.terrain, "terrain_generator", None)
+    mat_cfg = None
+    if terrain_generator is not None:
+        mat_cfg = terrain_generator.sub_terrains.get("backflip_mat")
+    if mat_height_m is not None:
+        if mat_cfg is None:
+            raise ValueError("mat_height_m requires a backflip-mat task")
+        if not 0.0 < mat_height_m < float(mat_cfg.pedestal_height):
+            raise ValueError("mat_height_m must be above floor and below cube")
+        mat_cfg.landing_mat_height = mat_height_m
+    if mat_contact_time_s is not None:
+        if mat_cfg is None:
+            raise ValueError("mat_contact_time_s requires a backflip-mat task")
+        if mat_contact_time_s <= 0.0:
+            raise ValueError("mat_contact_time_s must be positive")
+        mat_cfg.mat_contact_time_s = mat_contact_time_s
+    if mat_contact_damping is not None:
+        if mat_cfg is None:
+            raise ValueError("mat_contact_damping requires a backflip-mat task")
+        if mat_contact_damping <= 0.0:
+            raise ValueError("mat_contact_damping must be positive")
+        mat_cfg.mat_contact_damping = mat_contact_damping
+    if mat_friction is not None:
+        if mat_cfg is None:
+            raise ValueError("mat_friction requires a backflip-mat task")
+        if mat_friction <= 0.0:
+            raise ValueError("mat_friction must be positive")
+        mat_cfg.mat_slide_friction = mat_friction
     if render_env_index < 0 or render_env_index >= num_envs:
         raise ValueError("render_env_index must identify one of the vectorized envs")
 
@@ -134,6 +175,12 @@ def evaluate(
         raise ValueError("recovery_approach_tilt_deg must be in [0, 180]")
     if recovery_approach_height_m <= 0.0:
         raise ValueError("recovery_approach_height_m must be positive")
+    if recovery_blend_s < 0.0:
+        raise ValueError("recovery_blend_s must be non-negative")
+    if post_landing_delay_s < 0.0:
+        raise ValueError("post_landing_delay_s must be non-negative")
+    if recovery_phase_mode not in {"auto", "global", "local"}:
+        raise ValueError("recovery_phase_mode must be auto, global, or local")
     if not 0.0 <= snapshot_angle_deg <= 360.0:
         raise ValueError("snapshot_angle_deg must be in [0, 360]")
     if start_mode != "task":
@@ -149,6 +196,10 @@ def evaluate(
         assist_cfg["start_time_s"] = assist_start_s
     if assist_end_s is not None:
         assist_cfg["end_time_s"] = assist_end_s
+    if landing_damping_gain < 0.0 or landing_damping_max_nm < 0.0:
+        raise ValueError("landing damping parameters must be non-negative")
+    assist_cfg["landing_damping_gain_nm_per_rad_s"] = landing_damping_gain
+    assist_cfg["landing_damping_max_nm"] = landing_damping_max_nm
     if start_mode == "crouch":
         reset = env_cfg.events["set_backflip_state"].params
         reset["standing_prob"] = 0.0
@@ -260,6 +311,8 @@ def evaluate(
 
     obs = env.get_observations()
     launched = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    rotated_180 = torch.zeros_like(launched)
+    rotated_260 = torch.zeros_like(launched)
     rotated_300 = torch.zeros_like(launched)
     rotated_340 = torch.zeros_like(launched)
     rotated_360 = torch.zeros_like(launched)
@@ -281,6 +334,7 @@ def evaluate(
         num_envs, dtype=torch.long, device=device
     )
     post_landing_elapsed_steps = torch.zeros_like(recovery_elapsed_steps)
+    landing_elapsed_steps = torch.zeros_like(recovery_elapsed_steps)
     peak_z = torch.zeros(num_envs, device=device)
     peak_rotation = torch.zeros(num_envs, device=device)
     peak_ang_vel = torch.zeros(num_envs, device=device)
@@ -335,15 +389,36 @@ def evaluate(
             actions = policy(obs)
             if recovery_policy is not None and recovery_active.any():
                 recovery_obs = _specialist_observation(
-                    obs, recovery_elapsed_steps, base_env.step_dt
+                    obs,
+                    recovery_elapsed_steps,
+                    base_env.step_dt,
+                    local_phase=(
+                        recovery_phase_mode == "local"
+                        or (
+                            recovery_phase_mode == "auto"
+                            and recovery_switch_mode == "landing"
+                        )
+                    ),
                 )
                 recovery_actions = recovery_policy(recovery_obs)
+                if recovery_blend_s > 0.0:
+                    blend = (
+                        (recovery_elapsed_steps.to(actions.dtype) + 1.0)
+                        * float(base_env.step_dt)
+                        / float(recovery_blend_s)
+                    ).clamp_(0.0, 1.0)
+                    recovery_actions = torch.lerp(
+                        actions, recovery_actions, blend.unsqueeze(1)
+                    )
                 actions = torch.where(
                     recovery_active.unsqueeze(1), recovery_actions, actions
                 )
             if post_landing_policy is not None and post_landing_active.any():
                 post_landing_obs = _specialist_observation(
-                    obs, post_landing_elapsed_steps, base_env.step_dt
+                    obs,
+                    post_landing_elapsed_steps,
+                    base_env.step_dt,
+                    local_phase=True,
                 )
                 post_landing_actions = post_landing_policy(post_landing_obs)
                 actions = torch.where(
@@ -406,7 +481,11 @@ def evaluate(
             # only after the state machine validates a rotated, upright,
             # feet-first contact clear of the launch surface.
             recovery_active |= landed_now
-            post_landing_active |= landed_now
+            landing_elapsed_steps += landed_now.long()
+            post_landing_active |= landed_now & (
+                landing_elapsed_steps.to(torch.float32) * base_env.step_dt
+                >= float(post_landing_delay_s)
+            )
             if recovery_policy is not None and recovery_switch_mode == "approach":
                 robot_state = base_env.scene["robot"].data
                 quat_now = robot_state.root_link_quat_w
@@ -475,6 +554,8 @@ def evaluate(
             landed |= landed_now
             peak_z = torch.maximum(peak_z, base_env._backflip_max_z)
             peak_rotation = torch.maximum(peak_rotation, base_env._backflip_max)
+            rotated_180 |= base_env._backflip_max >= math.radians(180.0)
+            rotated_260 |= base_env._backflip_max >= math.radians(260.0)
             rotated_300 |= base_env._backflip_max >= math.radians(300.0)
             rotated_340 |= base_env._backflip_max >= math.radians(340.0)
             rotated_360 |= base_env._backflip_max >= 2 * math.pi
@@ -729,12 +810,15 @@ def evaluate(
             if post_landing_checkpoint is not None
             else None
         ),
+        "post_landing_delay_s": post_landing_delay_s,
         "device": device,
         "seed": seed,
         "episodes": num_envs,
         "start_mode": start_mode,
         "recovery_profile": recovery_profile,
         "recovery_switch_mode": recovery_switch_mode,
+        "recovery_blend_s": recovery_blend_s,
+        "recovery_phase_mode": recovery_phase_mode,
         "recovery_approach_gate": {
             "angle_deg": recovery_approach_angle_deg,
             "tilt_deg": recovery_approach_tilt_deg,
@@ -748,12 +832,26 @@ def evaluate(
             "backward_pitch_torque_nm": assist_cfg["backward_pitch_torque_nm"],
             "start_time_s": assist_cfg["start_time_s"],
             "end_time_s": assist_cfg["end_time_s"],
+            "landing_damping_gain_nm_per_rad_s": landing_damping_gain,
+            "landing_damping_max_nm": landing_damping_max_nm,
         },
         "stable_hold_s": STABLE_HOLD_S,
+        "landing_surface": (
+            {
+                "mat_height_m": float(mat_cfg.landing_mat_height),
+                "mat_contact_time_s": float(mat_cfg.mat_contact_time_s),
+                "mat_contact_damping": float(mat_cfg.mat_contact_damping),
+                "mat_friction": float(mat_cfg.mat_slide_friction),
+            }
+            if mat_cfg is not None
+            else {"type": "rigid_floor"}
+        ),
         "landed_environment_indices": torch.nonzero(landed).flatten().tolist(),
         "stable_environment_indices": torch.nonzero(stable).flatten().tolist(),
         "rates": {
             "takeoff": float(launched.float().mean().item()),
+            "airborne_rotation_ge_180deg": float(rotated_180.float().mean().item()),
+            "airborne_rotation_ge_260deg": float(rotated_260.float().mean().item()),
             "airborne_rotation_ge_300deg": float(rotated_300.float().mean().item()),
             "airborne_rotation_ge_340deg": float(rotated_340.float().mean().item()),
             "airborne_rotation_ge_360deg": float(rotated_360.float().mean().item()),
@@ -928,6 +1026,38 @@ def main() -> None:
     parser.add_argument("--assist-start-s", type=float)
     parser.add_argument("--assist-end-s", type=float)
     parser.add_argument(
+        "--landing-damping-gain",
+        type=float,
+        default=0.0,
+        help="Post-360 harness damping gain in Nms/rad",
+    )
+    parser.add_argument(
+        "--landing-damping-max-nm",
+        type=float,
+        default=0.0,
+        help="Maximum post-360 harness damping torque",
+    )
+    parser.add_argument(
+        "--mat-height-m",
+        type=float,
+        help="Override the landing-mat top height for a mat task",
+    )
+    parser.add_argument(
+        "--mat-contact-time-s",
+        type=float,
+        help="Override MuJoCo mat contact softness time constant",
+    )
+    parser.add_argument(
+        "--mat-contact-damping",
+        type=float,
+        help="Override MuJoCo landing-mat contact damping ratio",
+    )
+    parser.add_argument(
+        "--mat-friction",
+        type=float,
+        help="Override landing-mat sliding friction",
+    )
+    parser.add_argument(
         "--recovery-checkpoint",
         type=Path,
         help="Optional second actor activated after a valid feet-first landing latch",
@@ -944,9 +1074,27 @@ def main() -> None:
         help="Activate the specialist at validated contact or during final approach",
     )
     parser.add_argument(
+        "--recovery-blend-s",
+        type=float,
+        default=0.0,
+        help="Cross-fade primary and recovery actions over this duration",
+    )
+    parser.add_argument(
+        "--recovery-phase-mode",
+        choices=("auto", "global", "local"),
+        default="auto",
+        help="Context phase convention expected by the recovery actor",
+    )
+    parser.add_argument(
         "--post-landing-checkpoint",
         type=Path,
         help="Optional third actor activated after the validated landing latch",
+    )
+    parser.add_argument(
+        "--post-landing-delay-s",
+        type=float,
+        default=0.0,
+        help="Delay the third actor after the validated landing latch",
     )
     parser.add_argument(
         "--recovery-approach-angle-deg",
@@ -1014,6 +1162,15 @@ def main() -> None:
         args.snapshot_output,
         args.snapshot_angle_deg,
         args.snapshot_event,
+        args.recovery_blend_s,
+        args.recovery_phase_mode,
+        args.mat_height_m,
+        args.mat_contact_time_s,
+        args.mat_contact_damping,
+        args.mat_friction,
+        args.post_landing_delay_s,
+        args.landing_damping_gain,
+        args.landing_damping_max_nm,
     )
 
 

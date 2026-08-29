@@ -1,9 +1,17 @@
 # Curated backflip evidence
 
-The repository intentionally does not version training logs, PyTorch
-checkpoints, bulk sweeps, or every exploratory evaluation. The JSON files
-force-added beside this manifest are the minimum evidence needed to audit the
-current claims in the documentation:
+The repository intentionally does not version bulk training logs, sweeps, or
+every exploratory evaluation. Selected promoted checkpoints and evidence are
+force-added beside this manifest so the documented milestone can be replayed:
+
+- `checkpoints/v88-assisted-cube-to-mat-model650/`: launch checkpoint and
+  frozen run configuration for the first complete assisted cube-to-mat result.
+- `checkpoints/v44-unified-model510/`: apex-to-mat recovery checkpoint used by
+  the v88 policy handoff.
+- `research_cube_to_mat_harness_v88_g0p16_m0p40_64_seed45_warp1.json`: complete
+  deterministic 64-world evaluation for the v88 assisted configuration.
+- `videos/v88-cube-mat-harness-success-seed45-env28-warp1/`: exact 4 s replay,
+  evaluator output, and per-step trace for successful environment 28.
 
 - `threaded_v15_model1175_strict_seed42.json`: best pre-research strict
   standing-start baseline; reliable takeoff but incomplete rotation.
@@ -30,7 +38,7 @@ and feet-down contact. They isolate the landing controller and **do not prove a
 standing-start backflip**. The project acceptance gates require the independent
 standing-start batteries documented in `docs/backflip.md`.
 
-Each JSON records its checkpoint path for provenance, but checkpoints are not
-committed because they are generated artifacts. A promoted final policy will
-be released separately only after it passes the documented multi-seed nominal
-and backlash batteries.
+Older JSONs retain their original local checkpoint path for provenance. Only
+the two checkpoints required to replay promoted v44/v88 evidence are committed.
+A final autonomous policy is still withheld until it passes the documented
+multi-seed nominal and backlash batteries.

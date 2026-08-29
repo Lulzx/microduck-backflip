@@ -41,6 +41,7 @@ from mjlab_microduck.tasks.microduck_roulade_env_cfg import (
 
 STAND_Z = 0.115
 EPISODE_LENGTH_S = 4.0
+SOFT_MAT_HEIGHT = 0.22
 REFERENCE_STATE_PATH = (
     Path(__file__).parent / "data" / "pedestal_model225_angle260_seed42.json"
 )
@@ -49,6 +50,27 @@ EARLY_REFERENCE_STATE_PATH = (
 )
 MAT_LANDING_REFERENCE_STATE_PATH = (
     Path(__file__).parent / "data" / "mat_model460_landing_seed42.json"
+)
+LAUNCH650_MAT510_LANDING_STATE_PATH = (
+    Path(__file__).parent
+    / "data"
+    / "mat_launch650_mat510_landing_t1p50_angle180_seed45_warp1.json"
+)
+LAUNCH650_MAT510_ANGLE260_STATE_PATH = (
+    Path(__file__).parent
+    / "data"
+    / "mat_launch650_mat510_angle260_t1p50_seeds40-47_warp1.json"
+)
+CURRENT_FLOOR_REFERENCE_STATE_PATH = (
+    Path(__file__).parent / "data" / "pedestal_floor_model600_angle180_seed45.json"
+)
+CURRENT_FLOOR_LANDING_STATE_PATH = (
+    Path(__file__).parent / "data" / "pedestal_floor_model600_landing_seed45.json"
+)
+LAUNCH650_FLOOR_REFERENCE_STATE_PATH = (
+    Path(__file__).parent
+    / "data"
+    / "pedestal_floor_launch650_nominal_angle160_seed45.json"
 )
 
 _LEG_JOINTS = [0, 1, 2, 3, 4, 9, 10, 11, 12, 13]
@@ -426,12 +448,20 @@ def make_microduck_backflip_env_cfg(play: bool = False):
 def configure_backflip_standing_eval(cfg) -> None:
     """Force all resets to standing without the training curriculum undoing it."""
     reset_cfg = cfg.events["set_backflip_state"]
-    reset_cfg.params["standing_prob"] = 1.0
-    reset_cfg.params["crouch_prob"] = 0.0
-    reset_cfg.params["midflight_prob"] = 0.0
-    reset_cfg.params["recovery_prob"] = 0.0
+    if "standing_probability" in reset_cfg.params:
+        # Three-way distillation reset: standing versus captured flight and
+        # landing states.  Do not inject the incompatible ``*_prob`` names
+        # accepted only by ``reset_backflip_state``.
+        reset_cfg.params["standing_probability"] = 1.0
+        reset_cfg.params["landing_probability"] = 0.0
+    else:
+        reset_cfg.params["standing_prob"] = 1.0
+        reset_cfg.params["crouch_prob"] = 0.0
+        reset_cfg.params["midflight_prob"] = 0.0
+        reset_cfg.params["recovery_prob"] = 0.0
     reset_cfg.params["initial_assist_scale"] = 0.0
     cfg.curriculum.pop("backflip_spawn_mix", None)
+    cfg.curriculum.pop("backflip_reference_spawn_mix", None)
 
 
 def make_microduck_backflip_recovery_env_cfg(play: bool = False):
@@ -911,14 +941,17 @@ def make_microduck_backflip_mat_reference_env_cfg(play: bool = False):
     return cfg
 
 
-def make_microduck_backflip_mat_landing_reference_env_cfg(play: bool = False):
+def make_microduck_backflip_mat_landing_reference_env_cfg(
+    play: bool = False,
+    reference_state_path: Path = MAT_LANDING_REFERENCE_STATE_PATH,
+):
     """Post-impact RSI from exact full-revolution model-460 mat contacts."""
     cfg = make_microduck_backflip_mat_reference_env_cfg(play=play)
     cfg.events["set_backflip_state"] = EventTermCfg(
         func=microduck_mdp.reset_backflip_landing_reference_state,
         mode="reset",
         params={
-            "reference_state_path": str(MAT_LANDING_REFERENCE_STATE_PATH),
+            "reference_state_path": str(reference_state_path),
             "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
         },
     )
@@ -944,14 +977,38 @@ def make_microduck_backflip_mat_landing_reference_env_cfg(play: bool = False):
     return cfg
 
 
-def make_microduck_backflip_mat_mixed_reference_env_cfg(play: bool = False):
+def make_microduck_backflip_launch650_mat_landing_env_cfg(
+    play: bool = False,
+):
+    """Recover exact contacts from the best cube-to-mat composition."""
+    return make_microduck_backflip_mat_landing_reference_env_cfg(
+        play=play,
+        reference_state_path=LAUNCH650_MAT510_LANDING_STATE_PATH,
+    )
+
+
+def make_microduck_backflip_launch650_mat_approach_env_cfg(
+    play: bool = False,
+):
+    """Continue deterministic live trajectories from 260 degrees to contact."""
+    cfg = make_microduck_backflip_mat_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"].params["reference_state_path"] = str(
+        LAUNCH650_MAT510_ANGLE260_STATE_PATH
+    )
+    return cfg
+
+
+def make_microduck_backflip_mat_mixed_reference_env_cfg(
+    play: bool = False,
+    flight_reference_state_path: Path = EARLY_REFERENCE_STATE_PATH,
+):
     """Unified apex-to-landing curriculum with exact touchdown rehearsal."""
     cfg = make_microduck_backflip_mat_reference_env_cfg(play=play)
     cfg.events["set_backflip_state"] = EventTermCfg(
         func=microduck_mdp.reset_backflip_mixed_reference_state,
         mode="reset",
         params={
-            "flight_reference_state_path": str(EARLY_REFERENCE_STATE_PATH),
+            "flight_reference_state_path": str(flight_reference_state_path),
             "landing_reference_state_path": str(MAT_LANDING_REFERENCE_STATE_PATH),
             "landing_probability": 0.5,
             "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
@@ -961,6 +1018,293 @@ def make_microduck_backflip_mat_mixed_reference_env_cfg(play: bool = False):
     # from the much longer flight slice while preserving all approach terms.
     cfg.rewards["backflip_stability_progress"].weight = 600.0
     cfg.rewards["backflip_success"].weight = 800.0
+    return cfg
+
+
+def make_microduck_backflip_mat_current_mixed_env_cfg(play: bool = False):
+    """Rehearse apex states emitted by the latest standing-cube actor."""
+    return make_microduck_backflip_mat_mixed_reference_env_cfg(
+        play=play,
+        flight_reference_state_path=CURRENT_FLOOR_REFERENCE_STATE_PATH,
+    )
+
+
+def make_microduck_backflip_mat_current_reference_env_cfg(play: bool = False):
+    """Pure current-actor apex continuation for uncontaminated evaluation."""
+    cfg = make_microduck_backflip_mat_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_reference_state,
+        mode="reset",
+        params={
+            "reference_state_path": str(CURRENT_FLOOR_REFERENCE_STATE_PATH),
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+        },
+    )
+    return cfg
+
+
+def make_microduck_backflip_current_floor_reference_env_cfg(play: bool = False):
+    """Pure model-600 apex continuation to the cube's lower floor."""
+    cfg = make_microduck_backflip_early_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"].params["reference_state_path"] = str(
+        CURRENT_FLOOR_REFERENCE_STATE_PATH
+    )
+    return cfg
+
+
+def make_microduck_backflip_launch650_floor_reference_env_cfg(
+    play: bool = False,
+):
+    """Continue from exact 160-degree states emitted by launch model 650.
+
+    The hierarchical evaluator gives the landing actor full authority at the
+    handoff. ``reset_backflip_reference_state`` likewise disables the launch
+    wrench, so training and inference see the same state/action distribution.
+    """
+    cfg = make_microduck_backflip_early_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"].params["reference_state_path"] = str(
+        LAUNCH650_FLOOR_REFERENCE_STATE_PATH
+    )
+    return cfg
+
+
+def make_microduck_backflip_current_floor_mixed_env_cfg(play: bool = False):
+    """Match both ends of model 600's real cube-to-lower-floor trajectory."""
+    cfg = make_microduck_backflip_current_floor_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_mixed_reference_state,
+        mode="reset",
+        params={
+            "flight_reference_state_path": str(CURRENT_FLOOR_REFERENCE_STATE_PATH),
+            "landing_reference_state_path": str(CURRENT_FLOOR_LANDING_STATE_PATH),
+            "landing_probability": 0.5,
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+        },
+    )
+    cfg.rewards["backflip_stability_progress"].weight = 600.0
+    cfg.rewards["backflip_success"].weight = 800.0
+    return cfg
+
+
+def make_microduck_backflip_current_floor_distillation_env_cfg(
+    play: bool = False,
+):
+    """Distill cube launch and the matched lower-floor continuation into one actor."""
+    cfg = make_microduck_backflip_current_floor_mixed_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_distillation_state,
+        mode="reset",
+        params={
+            "flight_reference_state_path": str(CURRENT_FLOOR_REFERENCE_STATE_PATH),
+            "landing_reference_state_path": str(CURRENT_FLOOR_LANDING_STATE_PATH),
+            "standing_probability": 0.20,
+            "landing_probability": 0.40,
+            "standing_z_range": (
+                PEDESTAL_HEIGHT + 0.11,
+                PEDESTAL_HEIGHT + 0.12,
+            ),
+            "standing_edge_offset": 0.035,
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+            "initial_assist_scale": 1.0,
+        },
+    )
+    cfg.curriculum["backflip_reference_spawn_mix"] = CurriculumTermCfg(
+        func=microduck_mdp.event_param_curriculum,
+        params={
+            "event_name": "set_backflip_state",
+            "param_stages": [
+                {
+                    # This task warm-starts model 690, and RSL restores its
+                    # global iteration counter instead of rebasing to zero.
+                    "step": 690 * 24,
+                    "params": {
+                        "standing_probability": 0.20,
+                        "landing_probability": 0.40,
+                    },
+                },
+                {
+                    "step": 730 * 24,
+                    "params": {
+                        "standing_probability": 0.35,
+                        "landing_probability": 0.325,
+                    },
+                },
+                {
+                    "step": 760 * 24,
+                    "params": {
+                        "standing_probability": 0.50,
+                        "landing_probability": 0.25,
+                    },
+                },
+            ],
+        },
+    )
+    return cfg
+
+
+def make_microduck_backflip_cube_launch_env_cfg(play: bool = False):
+    """Learn a reproducible cube takeoff before composing the landing policy.
+
+    The general curriculum clamps policy targets to five percent while the
+    virtual spotter is at full strength. That deadlocks launch discovery:
+    landing success is needed to anneal assistance, while annealing is needed
+    to expose useful action authority. This specialist keeps the time-limited
+    wrench, grants full joint-target authority, and recycles worlds at 180 deg.
+    """
+    cfg = make_microduck_backflip_pedestal_env_cfg(play=play)
+    # First solve the mechanically nominal maneuver. The general sim-to-real
+    # task spans battery sag, COM, inertia, friction, encoders, and armature;
+    # that makes most worlds infeasible before a launch motion exists. Robust
+    # continuation will widen each range only after nominal apex success.
+    actuator = cfg.scene.entities["robot"].articulation.actuators[0]
+    actuator.vin_range = (8.2, 8.2)
+    actuator.vin_drop_gain_range = (0.0, 0.0)
+    actuator.delay_min_lag = 3
+    actuator.delay_max_lag = 3
+    actuator.delay_per_env_phase = False
+    twist_ranges = cfg.commands["twist"].ranges
+    twist_ranges.lin_vel_x = (0.0, 0.0)
+    twist_ranges.lin_vel_y = (0.0, 0.0)
+    twist_ranges.ang_vel_z = (0.0, 0.0)
+    cfg.commands["twist"].rel_forward_envs = 0.0
+    cfg.events["foot_friction"].params["ranges"] = (1.0, 1.0)
+    cfg.events["encoder_bias"].params["bias_range"] = (0.0, 0.0)
+    cfg.events["base_com"].params["ranges"] = {
+        0: (0.0, 0.0),
+        1: (0.0, 0.0),
+        2: (0.0, 0.0),
+    }
+    cfg.events["randomize_mass_inertia"].params["alpha_range"] = (0.0, 0.0)
+    cfg.events["randomize_com"].params["ranges"] = (0.0, 0.0)
+    cfg.events["randomize_head_com"].params["ranges"] = (0.0, 0.0)
+    cfg.events["randomize_armature"].params["ranges"] = (1.0, 1.0)
+    cfg.events["randomize_joint_friction"].params["scale_range"] = (1.0, 1.0)
+    cfg.curriculum.pop("com_range", None)
+    cfg.curriculum.pop("head_com_range", None)
+    reset = cfg.events["set_backflip_state"].params
+    reset.update(
+        {
+            "standing_prob": 1.0,
+            "crouch_prob": 0.0,
+            "midflight_prob": 0.0,
+            "recovery_prob": 0.0,
+            "initial_assist_scale": 1.0,
+            "standing_tilt_max": 0.0,
+            "joint_noise_std": 0.0,
+            "standing_z_range": (
+                PEDESTAL_HEIGHT + 0.115,
+                PEDESTAL_HEIGHT + 0.115,
+            ),
+        }
+    )
+    cfg.curriculum.pop("backflip_spawn_mix", None)
+    # First takeover rung: enough authority to shape the push without letting
+    # an untrained full-scale action destroy the nominal assisted trajectory.
+    cfg.actions["joint_pos"].min_assisted_authority = 0.20
+    cfg.actions["joint_pos"].full_authority_after_angle_rad = None
+    # Training recycles successes immediately. Play/evaluation must retain the
+    # post-apex trajectory so the external evaluator can measure composition.
+    if not play:
+        cfg.terminations["backflip_launch_apex"] = TerminationTermCfg(
+            func=microduck_mdp.backflip_rotation_reached,
+            time_out=False,
+            params={"target_angle": math.pi},
+        )
+    cfg.rewards["backflip_rotation"].weight = 240.0
+    cfg.rewards["backflip_rotation"].params["target_angle"] = math.pi
+    cfg.rewards["backflip_flight_tuck"].weight = 24.0
+    for name in (
+        "backflip_prepare_landing",
+        "backflip_landing_approach",
+        "backflip_landing",
+        "backflip_landing_upright",
+        "backflip_landing_height",
+        "backflip_landing_stillness",
+        "backflip_landing_foot_support",
+        "backflip_stability_progress",
+        "backflip_success",
+        "backflip_late_pitch_rate",
+        "backflip_rotation_overshoot",
+        "backflip_post_landing_angular_speed",
+        "backflip_rotation_timing",
+    ):
+        if name in cfg.rewards:
+            cfg.rewards[name].weight = 0.0
+    return cfg
+
+
+def make_microduck_backflip_mat_distillation_env_cfg(play: bool = False):
+    """Distill the verified apex landing back into complete cube starts."""
+    cfg = make_microduck_backflip_mat_mixed_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_distillation_state,
+        mode="reset",
+        params={
+            "flight_reference_state_path": str(EARLY_REFERENCE_STATE_PATH),
+            "landing_reference_state_path": str(MAT_LANDING_REFERENCE_STATE_PATH),
+            "standing_probability": 0.20,
+            "landing_probability": 0.40,
+            "standing_z_range": (
+                PEDESTAL_HEIGHT + 0.11,
+                PEDESTAL_HEIGHT + 0.12,
+            ),
+            "standing_edge_offset": 0.035,
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+            "initial_assist_scale": 1.0,
+        },
+    )
+    cfg.curriculum["backflip_reference_spawn_mix"] = CurriculumTermCfg(
+        func=microduck_mdp.event_param_curriculum,
+        params={
+            "event_name": "set_backflip_state",
+            "param_stages": [
+                {
+                    # This task warm-starts model 510; curriculum counters are
+                    # restored from the checkpoint rather than reset to zero.
+                    "step": 510 * 24,
+                    "params": {
+                        "standing_probability": 0.20,
+                        "landing_probability": 0.40,
+                    },
+                },
+                {
+                    "step": 560 * 24,
+                    "params": {
+                        "standing_probability": 0.35,
+                        "landing_probability": 0.325,
+                    },
+                },
+                {
+                    "step": 610 * 24,
+                    "params": {
+                        "standing_probability": 0.50,
+                        "landing_probability": 0.25,
+                    },
+                },
+            ],
+        },
+    )
+    return cfg
+
+
+def make_microduck_backflip_soft_mat_distillation_env_cfg(
+    play: bool = False,
+):
+    """Standing-cube curriculum with a higher, softer gymnastics mat."""
+    cfg = make_microduck_backflip_mat_distillation_env_cfg(play=play)
+    mat = cfg.scene.terrain.terrain_generator.sub_terrains["backflip_mat"]
+    mat.landing_mat_height = SOFT_MAT_HEIGHT
+    mat.mat_contact_time_s = 0.12
+    target_height = SOFT_MAT_HEIGHT + STAND_Z
+    cfg.rewards["backflip_landing_approach"].params["target_height"] = target_height
+    cfg.rewards["backflip_landing"].params["target_height"] = target_height
+    cfg.rewards["backflip_landing_height"].params.update(
+        {
+            "target_height": target_height,
+            "minimum_height": SOFT_MAT_HEIGHT + 0.06,
+        }
+    )
+    cfg.rewards["backflip_rotation_timing"].params["target_height"] = target_height
     return cfg
 
 
@@ -1021,6 +1365,30 @@ MicroduckBackflipMatLandingReferenceRlCfg.run_name = (
     "microduck_backflip_reference_mat_landing"
 )
 
+MicroduckBackflipLaunch650MatLandingRlCfg = deepcopy(
+    MicroduckBackflipMatLandingReferenceRlCfg
+)
+MicroduckBackflipLaunch650MatLandingRlCfg.experiment_name = (
+    "microduck_backflip_launch650_mat_landing"
+)
+MicroduckBackflipLaunch650MatLandingRlCfg.run_name = (
+    "microduck_backflip_launch650_mat_landing"
+)
+MicroduckBackflipLaunch650MatLandingRlCfg.algorithm.learning_rate = 1.0e-4
+MicroduckBackflipLaunch650MatLandingRlCfg.algorithm.entropy_coef = 0.001
+
+MicroduckBackflipLaunch650MatApproachRlCfg = deepcopy(
+    MicroduckBackflipMatReferenceRlCfg
+)
+MicroduckBackflipLaunch650MatApproachRlCfg.experiment_name = (
+    "microduck_backflip_launch650_mat_approach"
+)
+MicroduckBackflipLaunch650MatApproachRlCfg.run_name = (
+    "microduck_backflip_launch650_mat_approach"
+)
+MicroduckBackflipLaunch650MatApproachRlCfg.algorithm.learning_rate = 1.0e-4
+MicroduckBackflipLaunch650MatApproachRlCfg.algorithm.entropy_coef = 0.001
+
 MicroduckBackflipMatMixedReferenceRlCfg = deepcopy(
     MicroduckBackflipMatReferenceRlCfg
 )
@@ -1030,3 +1398,61 @@ MicroduckBackflipMatMixedReferenceRlCfg.experiment_name = (
 MicroduckBackflipMatMixedReferenceRlCfg.run_name = (
     "microduck_backflip_reference_mat_mixed"
 )
+
+MicroduckBackflipMatDistillationRlCfg = deepcopy(
+    MicroduckBackflipMatMixedReferenceRlCfg
+)
+MicroduckBackflipMatDistillationRlCfg.experiment_name = (
+    "microduck_backflip_reference_mat_distillation"
+)
+MicroduckBackflipMatDistillationRlCfg.run_name = (
+    "microduck_backflip_reference_mat_distillation"
+)
+
+MicroduckBackflipMatCurrentMixedRlCfg = deepcopy(
+    MicroduckBackflipMatMixedReferenceRlCfg
+)
+MicroduckBackflipMatCurrentMixedRlCfg.experiment_name = (
+    "microduck_backflip_reference_mat_current"
+)
+MicroduckBackflipMatCurrentMixedRlCfg.run_name = (
+    "microduck_backflip_reference_mat_current"
+)
+
+MicroduckBackflipCurrentFloorRlCfg = deepcopy(
+    MicroduckBackflipMatCurrentMixedRlCfg
+)
+MicroduckBackflipCurrentFloorRlCfg.experiment_name = (
+    "microduck_backflip_reference_current_floor"
+)
+MicroduckBackflipCurrentFloorRlCfg.run_name = (
+    "microduck_backflip_reference_current_floor"
+)
+
+MicroduckBackflipLaunch650FloorRlCfg = deepcopy(
+    MicroduckBackflipCurrentFloorRlCfg
+)
+MicroduckBackflipLaunch650FloorRlCfg.experiment_name = (
+    "microduck_backflip_reference_launch650_floor"
+)
+MicroduckBackflipLaunch650FloorRlCfg.run_name = (
+    "microduck_backflip_reference_launch650_floor"
+)
+MicroduckBackflipLaunch650FloorRlCfg.algorithm.learning_rate = 1.0e-4
+MicroduckBackflipLaunch650FloorRlCfg.algorithm.entropy_coef = 0.001
+
+MicroduckBackflipCurrentFloorDistillationRlCfg = deepcopy(
+    MicroduckBackflipCurrentFloorRlCfg
+)
+MicroduckBackflipCurrentFloorDistillationRlCfg.experiment_name = (
+    "microduck_backflip_reference_current_floor_distillation"
+)
+MicroduckBackflipCurrentFloorDistillationRlCfg.run_name = (
+    "microduck_backflip_reference_current_floor_distillation"
+)
+
+MicroduckBackflipCubeLaunchRlCfg = deepcopy(MicroduckBackflipPedestalRlCfg)
+MicroduckBackflipCubeLaunchRlCfg.experiment_name = "microduck_backflip_cube_launch"
+MicroduckBackflipCubeLaunchRlCfg.run_name = "microduck_backflip_cube_launch"
+MicroduckBackflipCubeLaunchRlCfg.algorithm.learning_rate = 1.0e-4
+MicroduckBackflipCubeLaunchRlCfg.algorithm.entropy_coef = 0.001
