@@ -285,6 +285,23 @@ The resumed counter begins at iteration 51 and is scheduled through 450.
 Checkpoint promotion will use the strict standing-only evaluator, not mean PPO
 reward.
 
+**2026-08-29 17:52 IST — pedestal model 100, seed 42, 64 assisted standing starts.**
+
+- Takeoff 64/64; >=300 degrees 6/64; >=340 degrees 6/64; >=360 degrees 5/64.
+- Valid upright feet-first lower-floor landing latch: 3/64 (4.6875%); strict
+  0.5 s stable landing: 0/64; body-only contact: 64/64.
+- Maximum rotation 413.04 degrees. This preserves the landing signal but is not
+  an improvement over the warm-start baseline and is not promoted.
+- Environment 31 was rendered because it latches a valid lower-floor landing.
+  Visual inspection confirms that it stands on the cube, translates clear,
+  rotates backward, reaches the feet first, then collapses onto its body. The
+  clip is diagnostic evidence of the remaining recovery failure, not success.
+- Evidence: `results/research_pedestal_v27_model100_assisted_seed42.json` and
+  `results/videos/v27-pedestal-model100-assisted-contact/backflip-model_100-standing-step-0.mp4`.
+- Decision: continue through model 150. The independent landing rewards are
+  increasing episode length, but the strict reward remains zero, so no
+  assistance decay or checkpoint promotion is justified yet.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:
