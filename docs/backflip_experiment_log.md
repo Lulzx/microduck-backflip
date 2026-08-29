@@ -645,7 +645,9 @@ WARP_NUM_THREADS=12 .venv/bin/python scripts/eval_backflip.py \
   foot, 14/64 ever below 2 rad/s, 0/64 strict successes, 0.18 s maximum strict
   hold, and 0.40 s maximum posture hold. Its best trajectory is environment
   49: 392.72° rotation, feet-first contact, and the same 0.18 s strict hold.
-  Model 420 regressed to a 0.04 s maximum strict hold, so it was not promoted.
+  Model 420 regressed to a 0.04 s maximum strict hold. The completed run's
+  final model 449 recovered only to 0.08 s maximum strict hold (15/64 ever
+  below 2 rad/s, 58/64 first contacts on a foot), so neither was promoted.
 - Verified video:
   `results/videos/v36-reference-model380-best-env49/backflip-model_380-task-step-0.mp4`
   (H.264/yuv420p, 1280x720, 50 fps, 4.0 s). The associated trace and complete
