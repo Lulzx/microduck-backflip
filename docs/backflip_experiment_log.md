@@ -414,6 +414,42 @@ WARP_NUM_THREADS=12 .venv/bin/microduck-train \
 Run directory:
 `logs/rsl_rl/microduck_backflip_recovery/2026-08-29_18-23-32_impact-recovery-v2-high-spin-256`.
 
+**2026-08-29 18:29-18:36 IST — post-contact hypothesis rejected; v29 late-flight specialist.**
+
+- High-spin recovery model 250 achieved 63/64 strict holds on the synthetic
+  hard profile (up to -2.5 m/s and 12 rad/s), yet its composed pedestal result
+  remained 0/64 even with the approach switch.
+- The synthetic reset begins at 0.10–0.13 m trunk height in a nominal joint
+  pose. The measured real first contact is at 0.247 m with the legs extended.
+  Randomizing velocity after placing the robot on the ground therefore does
+  not reproduce pre-impact foot placement or contact geometry. The
+  post-contact-only specialist hypothesis is rejected despite its high
+  in-distribution score.
+- Added `Mjlab-BackflipTouchdown-Flat-MicroDuck`: 100% late-airborne RSI,
+  ballistic angle/height/spin coupling, body-only-contact termination, zero
+  assistance, and unchanged strict landing semantics.
+- Initial curriculum: 330–350 degrees, 0.22–0.30 m, 12–18 rad/s. It expands at
+  iterations 100 and 250 to 280–355 degrees, 0.20–0.38 m, 10–22 rad/s.
+- Focused tests: 35 passed. A 16-world one-iteration live smoke test completed
+  without NaNs. The task was warm-started from pedestal launch model 200,
+  SHA-256 `1923cca2d3fca768b6d39ffa627fb6a3b1e731b20ef737f21cf463d3d85a1c42`.
+
+Training command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-BackflipTouchdown-Flat-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 300 --agent.save-interval 25 \
+  --agent.run-name late-flight-v1-pedestal200-warmstart-256 \
+  --agent.logger tensorboard --agent.resume True \
+  --agent.load-run warmstart-pedestal-model200 \
+  --agent.load-checkpoint model_200.pt
+```
+
+Run directory:
+`logs/rsl_rl/microduck_backflip_touchdown/2026-08-29_18-35-12_late-flight-v1-pedestal200-warmstart-256`.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

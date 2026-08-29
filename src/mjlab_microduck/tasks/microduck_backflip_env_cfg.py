@@ -508,6 +508,94 @@ def make_microduck_backflip_recovery_env_cfg(play: bool = False):
     return cfg
 
 
+def make_microduck_backflip_touchdown_env_cfg(play: bool = False):
+    """Late-flight specialist that learns braking through post-impact recovery.
+
+    Unlike the post-contact recovery task, these worlds start while still
+    airborne near the end of the revolution. The actor must choose the leg
+    configuration before impact, arrest the remaining pitch, touch feet first,
+    and satisfy the unchanged strict hold in one continuous rollout.
+    """
+    cfg = make_microduck_backflip_env_cfg(play=play)
+    reset = cfg.events["set_backflip_state"].params
+    reset.update(
+        {
+            "standing_prob": 0.0,
+            "crouch_prob": 0.0,
+            "midflight_prob": 1.0,
+            "recovery_prob": 0.0,
+            "midflight_angle_range": (
+                math.radians(330.0),
+                math.radians(350.0),
+            ),
+            "midflight_z_range": (0.22, 0.30),
+            "midflight_omega_range": (12.0, 18.0),
+            "midflight_ballistic_landing": True,
+            "midflight_landing_z": STAND_Z,
+            "midflight_time_margin_range": (0.02, 0.05),
+            "tuck_factor_range": (0.35, 0.85),
+            "joint_noise_std": 0.02,
+            "initial_assist_scale": 0.0,
+        }
+    )
+    cfg.curriculum.pop("backflip_spawn_mix", None)
+    cfg.curriculum["backflip_touchdown_difficulty"] = CurriculumTermCfg(
+        func=microduck_mdp.event_param_curriculum,
+        params={
+            "event_name": "set_backflip_state",
+            "param_stages": [
+                {
+                    "step": 0,
+                    "params": {
+                        "midflight_angle_range": (
+                            math.radians(330.0),
+                            math.radians(350.0),
+                        ),
+                        "midflight_z_range": (0.22, 0.30),
+                        "midflight_omega_range": (12.0, 18.0),
+                        "midflight_time_margin_range": (0.02, 0.05),
+                        "tuck_factor_range": (0.35, 0.85),
+                        "joint_noise_std": 0.02,
+                    },
+                },
+                {
+                    "step": 100 * 24,
+                    "params": {
+                        "midflight_angle_range": (
+                            math.radians(310.0),
+                            math.radians(350.0),
+                        ),
+                        "midflight_z_range": (0.22, 0.34),
+                        "midflight_omega_range": (12.0, 20.0),
+                        "midflight_time_margin_range": (0.02, 0.07),
+                        "tuck_factor_range": (0.25, 1.0),
+                        "joint_noise_std": 0.04,
+                    },
+                },
+                {
+                    "step": 250 * 24,
+                    "params": {
+                        "midflight_angle_range": (
+                            math.radians(280.0),
+                            math.radians(355.0),
+                        ),
+                        "midflight_z_range": (0.20, 0.38),
+                        "midflight_omega_range": (10.0, 22.0),
+                        "midflight_time_margin_range": (0.01, 0.10),
+                        "tuck_factor_range": (0.15, 1.0),
+                        "joint_noise_std": 0.07,
+                    },
+                },
+            ],
+        },
+    )
+    cfg.terminations["backflip_body_only_contact"] = TerminationTermCfg(
+        func=microduck_mdp.backflip_body_only_contact,
+        time_out=False,
+    )
+    return cfg
+
+
 def make_microduck_backflip_pedestal_env_cfg(play: bool = False):
     """Launch from a 25 cm cube and require landing on the lower floor.
 
@@ -601,6 +689,10 @@ MicroduckBackflipRlCfg.algorithm.symmetry_cfg = None
 MicroduckBackflipRecoveryRlCfg = deepcopy(MicroduckBackflipRlCfg)
 MicroduckBackflipRecoveryRlCfg.experiment_name = "microduck_backflip_recovery"
 MicroduckBackflipRecoveryRlCfg.run_name = "microduck_backflip_recovery"
+
+MicroduckBackflipTouchdownRlCfg = deepcopy(MicroduckBackflipRlCfg)
+MicroduckBackflipTouchdownRlCfg.experiment_name = "microduck_backflip_touchdown"
+MicroduckBackflipTouchdownRlCfg.run_name = "microduck_backflip_touchdown"
 
 MicroduckBackflipPedestalRlCfg = deepcopy(MicroduckBackflipRlCfg)
 MicroduckBackflipPedestalRlCfg.experiment_name = "microduck_backflip_pedestal"

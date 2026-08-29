@@ -10,6 +10,7 @@ from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     MicroduckBackflipRlCfg,
     make_microduck_backflip_env_cfg,
     make_microduck_backflip_recovery_env_cfg,
+    make_microduck_backflip_touchdown_env_cfg,
     make_microduck_backflip_pedestal_env_cfg,
 )
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
@@ -148,6 +149,23 @@ def test_pedestal_curriculum_starts_on_cube_and_requires_lower_floor_clearance()
     assert cfg.rewards["backflip_takeoff"].params["start_height"] > PEDESTAL_HEIGHT
     assert "backflip_spawn_mix" in cfg.curriculum
     assert cfg.events["backflip_assistive_wrench"].params["backward_force_n"] > 0.0
+
+
+def test_touchdown_specialist_starts_airborne_and_expands_approach_distribution():
+    cfg = make_microduck_backflip_touchdown_env_cfg()
+    reset = cfg.events["set_backflip_state"].params
+    assert reset["standing_prob"] == 0.0
+    assert reset["midflight_prob"] == 1.0
+    assert reset["recovery_prob"] == 0.0
+    assert reset["midflight_ballistic_landing"] is True
+    assert reset["initial_assist_scale"] == 0.0
+    assert "backflip_body_only_contact" in cfg.terminations
+    stages = cfg.curriculum["backflip_touchdown_difficulty"].params["param_stages"]
+    assert stages[0]["params"]["midflight_angle_range"][0] > stages[-1][
+        "params"
+    ]["midflight_angle_range"][0]
+    assert stages[-1]["params"]["midflight_omega_range"][1] >= 20.0
+    assert stages[-1]["params"]["midflight_z_range"][1] >= 0.35
 
 
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():

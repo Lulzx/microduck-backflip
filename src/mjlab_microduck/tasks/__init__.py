@@ -70,9 +70,11 @@ from .microduck_roulade_env_cfg import (
 from .microduck_backflip_env_cfg import (
     make_microduck_backflip_env_cfg,
     make_microduck_backflip_recovery_env_cfg,
+    make_microduck_backflip_touchdown_env_cfg,
     make_microduck_backflip_pedestal_env_cfg,
     MicroduckBackflipRlCfg,
     MicroduckBackflipRecoveryRlCfg,
+    MicroduckBackflipTouchdownRlCfg,
     MicroduckBackflipPedestalRlCfg,
 )
 from .backlash import make_backlash_variant
@@ -92,6 +94,15 @@ register_mjlab_task(
     env_cfg=make_microduck_backflip_recovery_env_cfg(),
     play_env_cfg=make_microduck_backflip_recovery_env_cfg(play=True),
     rl_cfg=MicroduckBackflipRecoveryRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Late-flight specialist — braking, foot placement and impact recovery are one skill.
+register_mjlab_task(
+    task_id="Mjlab-BackflipTouchdown-Flat-MicroDuck",
+    env_cfg=make_microduck_backflip_touchdown_env_cfg(),
+    play_env_cfg=make_microduck_backflip_touchdown_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipTouchdownRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

@@ -48,6 +48,14 @@ force is annealed with the other assistance, and evaluation can set the entire
 spotter scale to zero. A pedestal result is reported separately and is not
 called a flat-ground backflip.
 
+`Mjlab-BackflipTouchdown-Flat-MicroDuck` isolates the measured remaining
+failure without skipping impact physics. It resets while still airborne late
+in the revolution, then requires the policy to brake, choose its landing leg
+configuration, contact the feet, absorb the impact, and hold. Its curriculum
+expands from 330–350° at 12–18 rad/s to 280–355° at 10–22 rad/s. This differs
+from a post-contact recovery reset, which cannot teach pre-impact foot
+placement and was shown not to transfer to the actual cube touchdown.
+
 The current discovery task also uses an EFGCL-style virtual spotter: a 16 N
 upward force and 1.40 Nm backward-pitch torque from 0.30 to 0.40 seconds. Its
 scale drops only after a 60% strict landing rate over an evaluation window.
