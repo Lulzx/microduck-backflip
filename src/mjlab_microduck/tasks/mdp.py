@@ -7796,6 +7796,7 @@ def reset_backflip_state(
     recovery_tilt_max: float = math.radians(15.0),
     recovery_lin_vel_max: float = 0.20,
     recovery_ang_vel_max: float = 1.50,
+    recovery_vertical_velocity_range: tuple = (0.0, 0.0),
     tuck_overrides: Optional[dict] = None,
     tuck_factor_range: tuple = (0.5, 1.0),
     joint_noise_std: float = 0.05,
@@ -7917,6 +7918,14 @@ def reset_backflip_state(
         env.sim.data.qvel[recovery_ids, :2] = (
             torch.rand(len(recovery_ids), 2, device=env.device) * 2 - 1
         ) * recovery_lin_vel_max
+        env.sim.data.qvel[recovery_ids, 2] = (
+            torch.rand(len(recovery_ids), device=env.device)
+            * (
+                recovery_vertical_velocity_range[1]
+                - recovery_vertical_velocity_range[0]
+            )
+            + recovery_vertical_velocity_range[0]
+        )
         env.sim.data.qvel[recovery_ids, 3:6] = (
             torch.rand(len(recovery_ids), 3, device=env.device) * 2 - 1
         ) * recovery_ang_vel_max

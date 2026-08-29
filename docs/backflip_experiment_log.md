@@ -302,6 +302,62 @@ reward.
   increasing episode length, but the strict reward remains zero, so no
   assistance decay or checkpoint promotion is justified yet.
 
+**2026-08-29 17:56-18:05 IST — pedestal models 150/200/250 and plateau decision.**
+
+| checkpoint | >=340 | landing latch | strict 0.5 s | body-only contact |
+|---|---:|---:|---:|---:|
+| model 150 | 4/64 | 2/64 | 0/64 | 64/64 |
+| model 200 | 5/64 | **5/64** | 0/64 | 64/64 |
+| model 250 | 6/64 | 4/64 | 0/64 | 62/64 |
+
+Model 200 is the best cube landing-contact checkpoint, but none improves the
+strict hold. At iteration 200 the curriculum changed from 35% to 55% standing
+starts and halved preload reward; model 250 still had no stable streak. The run
+was stopped at iteration 258 rather than spending another ~15 minutes on a
+falsified recovery hypothesis. Evidence is in the corresponding
+`results/research_pedestal_v27_model{150,200,250}_assisted_seed42.json` files
+(local unless explicitly curated).
+
+## v28 impact-recovery specialist and policy composition
+
+Hypothesis: the launch/flight controller and impact-recovery controller are
+distinct skills. Retain pedestal model 200 through the first valid feet contact,
+then switch to a specialist trained only to absorb and stabilize the landing.
+This is a deterministic state-machine composition, not a relaxed success gate.
+
+The first composition probe used v26 model 50 as the recovery actor. It
+activated in 3/64 valid-contact worlds but produced 0 strict holds. Code review
+then exposed a distribution error: recovery resets randomized horizontal and
+angular velocity but always set vertical velocity to zero, while pedestal
+touchdowns are descending impacts.
+
+v28 changes:
+
+- `reset_backflip_state` now accepts a recovery-only vertical-velocity range.
+- Specialist stages progress from -0.40 m/s, 5 degree, 0.75 rad/s disturbances
+  to -3.25 m/s, 45 degree, 10 rad/s disturbances.
+- `eval_backflip.py --recovery-checkpoint` loads a second actor and switches
+  each world only after the existing state machine validates a rotated,
+  upright, feet-first contact clear of the cube.
+- The strict 0.5 s definition, pedestal geometry, actuator limits, and launch
+  actor are unchanged.
+
+Training command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-BackflipRecovery-Flat-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 400 --agent.save-interval 50 \
+  --agent.run-name impact-recovery-v1-model50-warmstart-256 \
+  --agent.logger tensorboard --agent.resume True \
+  --agent.load-run warmstart-v26-model50 \
+  --agent.load-checkpoint model_50.pt
+```
+
+Run directory:
+`logs/rsl_rl/microduck_backflip_recovery/2026-08-29_18-07-19_impact-recovery-v1-model50-warmstart-256`.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

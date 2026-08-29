@@ -125,7 +125,12 @@ def test_recovery_specialist_uses_easy_to_full_reference_state_curriculum():
     assert stages[0]["params"]["recovery_ang_vel_max"] < stages[-1]["params"][
         "recovery_ang_vel_max"
     ]
-    assert stages[-1]["params"]["recovery_ang_vel_max"] == 1.5
+    assert stages[-1]["params"]["recovery_ang_vel_max"] == 10.0
+    assert stages[0]["params"]["recovery_vertical_velocity_range"][0] < 0.0
+    assert (
+        stages[-1]["params"]["recovery_vertical_velocity_range"][0]
+        < stages[0]["params"]["recovery_vertical_velocity_range"][0]
+    )
 
 
 def test_pedestal_curriculum_starts_on_cube_and_requires_lower_floor_clearance():

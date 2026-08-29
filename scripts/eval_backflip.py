@@ -82,6 +82,7 @@ def evaluate(
     assist_start_s: float | None = None,
     assist_end_s: float | None = None,
     task_id: str = TASK_ID,
+    recovery_checkpoint: Path | None = None,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -153,6 +154,16 @@ def evaluate(
         str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
     )
     policy = runner.get_inference_policy(device=device)
+    recovery_policy = None
+    if recovery_checkpoint is not None:
+        recovery_runner = runner_cls(env, asdict(agent_cfg), device=device)
+        recovery_runner.load(
+            str(recovery_checkpoint),
+            load_cfg={"actor": True},
+            strict=True,
+            map_location=device,
+        )
+        recovery_policy = recovery_runner.get_inference_policy(device=device)
 
     obs = env.get_observations()
     launched = torch.zeros(num_envs, dtype=torch.bool, device=device)
@@ -171,6 +182,7 @@ def evaluate(
     ever_landing_low_angular_speed = torch.zeros_like(launched)
     body_contact = torch.zeros_like(launched)
     nonfinite_state = torch.zeros_like(launched)
+    recovery_active = torch.zeros_like(launched)
     peak_z = torch.zeros(num_envs, device=device)
     peak_rotation = torch.zeros(num_envs, device=device)
     peak_ang_vel = torch.zeros(num_envs, device=device)
@@ -202,10 +214,19 @@ def evaluate(
     with torch.inference_mode():
         for step in range(base_env.max_episode_length):
             actions = policy(obs)
+            if recovery_policy is not None and recovery_active.any():
+                recovery_actions = recovery_policy(obs)
+                actions = torch.where(
+                    recovery_active.unsqueeze(1), recovery_actions, actions
+                )
             obs, _, _, _ = env.step(actions)
             now = (step + 1) * base_env.step_dt
             launched_now = base_env._backflip_airborne_latch
             landed_now = base_env._backflip_landed_latch
+            # The launch actor owns the complete ballistic maneuver. Switch
+            # only after the state machine validates a rotated, upright,
+            # feet-first contact clear of the launch surface.
+            recovery_active |= landed_now
             first_takeoff = launched_now & ~launched
             first_300 = (base_env._backflip_max >= math.radians(300.0)) & ~rotated_300
             first_landing = landed_now & ~landed
@@ -427,6 +448,11 @@ def evaluate(
     result = {
         "task": task_id,
         "checkpoint": str(checkpoint.resolve()),
+        "recovery_checkpoint": (
+            str(recovery_checkpoint.resolve())
+            if recovery_checkpoint is not None
+            else None
+        ),
         "device": device,
         "seed": seed,
         "episodes": num_envs,
@@ -454,6 +480,9 @@ def evaluate(
                 first_ground_contact_was_feet.float().mean().item()
             ),
             "nonfinite_state": float(nonfinite_state.float().mean().item()),
+            "recovery_policy_activated": float(
+                recovery_active.float().mean().item()
+            ),
             "ever_landing_feet": float(ever_landing_feet.float().mean().item()),
             "ever_landing_upright": float(
                 ever_landing_upright.float().mean().item()
@@ -563,6 +592,11 @@ def main() -> None:
     parser.add_argument("--assist-start-s", type=float)
     parser.add_argument("--assist-end-s", type=float)
     parser.add_argument(
+        "--recovery-checkpoint",
+        type=Path,
+        help="Optional second actor activated after a valid feet-first landing latch",
+    )
+    parser.add_argument(
         "--trace-output",
         type=Path,
         help="Write per-step kinematics and policy actions for environment zero",
@@ -583,6 +617,7 @@ def main() -> None:
         args.assist_start_s,
         args.assist_end_s,
         args.task_id,
+        args.recovery_checkpoint,
     )
 
 
