@@ -1,5 +1,6 @@
 """Configuration invariants for the airborne MicroDuck backflip task."""
 
+import inspect
 import json
 import math
 from pathlib import Path
@@ -8,39 +9,39 @@ from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.backflip_actions import (
     BackflipResidualJointPositionActionCfg,
 )
-from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
-    MicroduckBackflipRlCfg,
-    MicroduckBackflipCubeLaunchRlCfg,
-    MicroduckBackflipLaunch650FloorRlCfg,
-    MicroduckBackflipLaunch650MatLandingRlCfg,
-    MicroduckBackflipLaunch650MatApproachRlCfg,
-    make_microduck_backflip_env_cfg,
-    make_microduck_backflip_recovery_env_cfg,
-    make_microduck_backflip_touchdown_env_cfg,
-    make_microduck_backflip_pedestal_env_cfg,
-    make_microduck_backflip_pedestal_braking_env_cfg,
-    make_microduck_backflip_reference_env_cfg,
-    make_microduck_backflip_early_reference_env_cfg,
-    make_microduck_backflip_mat_reference_env_cfg,
-    make_microduck_backflip_mat_landing_reference_env_cfg,
-    make_microduck_backflip_launch650_mat_landing_env_cfg,
-    make_microduck_backflip_launch650_mat_approach_env_cfg,
-    make_microduck_backflip_mat_mixed_reference_env_cfg,
-    make_microduck_backflip_mat_distillation_env_cfg,
-    make_microduck_backflip_soft_mat_distillation_env_cfg,
-    make_microduck_backflip_mat_current_mixed_env_cfg,
-    make_microduck_backflip_mat_current_reference_env_cfg,
-    make_microduck_backflip_current_floor_reference_env_cfg,
-    make_microduck_backflip_current_floor_mixed_env_cfg,
-    make_microduck_backflip_current_floor_distillation_env_cfg,
-    make_microduck_backflip_launch650_floor_reference_env_cfg,
-    make_microduck_backflip_cube_launch_env_cfg,
-)
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
-    BackflipMatTerrainCfg,
     LANDING_MAT_HEIGHT,
     PEDESTAL_HEIGHT,
     PEDESTAL_WIDTH,
+    BackflipMatTerrainCfg,
+)
+from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
+    MicroduckBackflipCubeLaunchRlCfg,
+    MicroduckBackflipLaunch650FloorRlCfg,
+    MicroduckBackflipLaunch650MatApproachRlCfg,
+    MicroduckBackflipLaunch650MatLandingRlCfg,
+    MicroduckBackflipRlCfg,
+    make_microduck_backflip_cube_launch_env_cfg,
+    make_microduck_backflip_current_floor_distillation_env_cfg,
+    make_microduck_backflip_current_floor_mixed_env_cfg,
+    make_microduck_backflip_current_floor_reference_env_cfg,
+    make_microduck_backflip_early_reference_env_cfg,
+    make_microduck_backflip_env_cfg,
+    make_microduck_backflip_launch650_floor_reference_env_cfg,
+    make_microduck_backflip_launch650_mat_approach_env_cfg,
+    make_microduck_backflip_launch650_mat_landing_env_cfg,
+    make_microduck_backflip_mat_current_mixed_env_cfg,
+    make_microduck_backflip_mat_current_reference_env_cfg,
+    make_microduck_backflip_mat_distillation_env_cfg,
+    make_microduck_backflip_mat_landing_reference_env_cfg,
+    make_microduck_backflip_mat_mixed_reference_env_cfg,
+    make_microduck_backflip_mat_reference_env_cfg,
+    make_microduck_backflip_pedestal_braking_env_cfg,
+    make_microduck_backflip_pedestal_env_cfg,
+    make_microduck_backflip_recovery_env_cfg,
+    make_microduck_backflip_reference_env_cfg,
+    make_microduck_backflip_soft_mat_distillation_env_cfg,
+    make_microduck_backflip_touchdown_env_cfg,
 )
 from mjlab_microduck.tasks.microduck_roulade_env_cfg import (
     make_microduck_roulade_env_cfg,
@@ -530,6 +531,10 @@ def test_assistive_wrench_is_success_gated_and_eval_disables_it():
     assert assist.mode == "step"
     assert assist.params["upward_force_n"] > 0.0
     assert assist.params["backward_pitch_torque_nm"] > 0.0
+    signature = inspect.signature(microduck_mdp.apply_backflip_assistive_wrench)
+    assert signature.parameters["landing_damping_gain_nm_per_rad_s"].default == 0.0
+    assert signature.parameters["landing_damping_max_nm"].default == 0.0
+    assert signature.parameters["landing_damping_duration_s"].default == 0.0
     reset = cfg.events["set_backflip_state"].params
     assert reset["initial_assist_scale"] == 1.0
     assert reset["assist_success_threshold"] == 0.60

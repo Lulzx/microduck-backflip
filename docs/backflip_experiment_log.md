@@ -856,6 +856,33 @@ acceptance. Next, train on the live v88 approach distribution while annealing
 the post-360 damper, then anneal the launch pulse and repeat multi-seed and
 backlash batteries. This result is not eligible for physical deployment.
 
+**2026-08-30 00:41-00:49 IST — v89 landing-harness frontier and duration
+ablation.**
+
+- Gain frontier at seed 45, 64 deterministic worlds, 0.40 Nm cap: gains 0.12
+  and 0.13 reached 0.10 s maximum strict hold; 0.14 reached 0.48 s; 0.145
+  bifurcated back to 0.12 s; 0.15 succeeded at 1/64 with a 0.78 s hold. This
+  rejects a smooth gain threshold and confirms contact-sensitive trajectory
+  basins.
+- The 0.15 setting was then evaluated over seeds 40-47 (512 standing starts).
+  Full-revolution rates ranged from 2/64 to 9/64, but seed 45 environment 28
+  was the only strict success: 1/512 total. It is a curriculum seed, not a
+  robust controller.
+- Integrating the v88 environment-28 trace against the bounded damping law
+  estimates 0.73 J of rotational energy removed over 1.56 s. Approximately
+  0.49 J is removed in the first 0.50 s. This is a trace-derived estimate,
+  not direct simulator work telemetry.
+- v89 adds `--landing-damping-duration-s`. Zero preserves the prior unlimited
+  behavior; a positive value disables damping after the specified time since
+  the valid landing latch. With gain 0.16 and cap 0.40 Nm, duration 0.30 s
+  reached 0.12 s maximum hold, 0.50/0.60 s reached 0.20 s, 0.70 s reached
+  0.28 s, and 0.80 s produced the sole strict success with a 0.64 s hold.
+
+Decision: start recovery distillation from the 0.80 s assisted basin and
+shorten duration before reducing gain. The current policy needs continued
+post-impact balance assistance, so an impact-only damper is not yet enough.
+All v89 trials retain the launch pulse and fail autonomous acceptance.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

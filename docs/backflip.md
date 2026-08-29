@@ -232,6 +232,15 @@ the result JSON and in the accompanying claim. Autonomous acceptance always
 sets `--assist-scale 0`, `--landing-damping-gain 0`, and
 `--landing-damping-max-nm 0`.
 
+`--landing-damping-duration-s` can further bound the post-revolution harness.
+Zero means it remains enabled for the rest of the episode; a positive value
+turns it off that many seconds after the validated landing latch. In the
+seed-45 v88 trajectory, 0.50 s of damping is insufficient (0.20 s maximum
+strict hold), 0.70 s is still insufficient (0.28 s), and 0.80 s produces one
+0.64 s strict hold. The actor therefore still needs assistance beyond the
+initial collision; training must learn both impact absorption and subsequent
+balance, not merely imitate the first contact pose.
+
 Before export, require three 128-episode batteries with seeds 42, 123, and 2026:
 
 - takeoff rate at least 99%;

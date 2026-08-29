@@ -12,6 +12,12 @@ force-added beside this manifest so the documented milestone can be replayed:
   deterministic 64-world evaluation for the v88 assisted configuration.
 - `videos/v88-cube-mat-harness-success-seed45-env28-warp1/`: exact 4 s replay,
   evaluator output, and per-step trace for successful environment 28.
+- `research_cube_to_mat_harness_anneal_g0p15_m0p40_64_seed{40..47}_warp1.json`:
+  deterministic multi-seed evidence showing only 1/512 strict successes at the
+  reduced 0.15 Nms/rad gain.
+- `research_cube_to_mat_harness_duration_d*_g0p16_m0p40_64_seed45_warp1.json`:
+  duration ablation proving that the current actor needs at least the tested
+  0.80 s harness window; 0.30-0.70 s did not pass the strict gate.
 
 - `threaded_v15_model1175_strict_seed42.json`: best pre-research strict
   standing-start baseline; reliable takeoff but incomplete rotation.

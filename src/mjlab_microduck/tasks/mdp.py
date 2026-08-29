@@ -7520,6 +7520,9 @@ def _backflip_state(env: ManagerBasedRlEnv) -> tuple:
             env._backflip_stable_steps
         )
         env._backflip_stable_latch = torch.zeros_like(env._backflip_had_support)
+        env._backflip_landing_harness_steps = torch.zeros(
+            env.num_envs, dtype=torch.long, device=env.device
+        )
         # External-force-guided curriculum (EFGCL) bookkeeping. The scalar
         # assistance level is shared by all worlds; eligibility is per-world
         # so reverse-curriculum mid-flight resets never receive a free push.
@@ -7621,6 +7624,7 @@ def apply_backflip_assistive_wrench(
     backward_pitch_torque_nm: float = 1.40,
     landing_damping_gain_nm_per_rad_s: float = 0.0,
     landing_damping_max_nm: float = 0.0,
+    landing_damping_duration_s: float = 0.0,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=("trunk_base",)),
 ) -> torch.Tensor:
     """Apply explicit launch and optional post-revolution curriculum harnesses.
@@ -7629,9 +7633,10 @@ def apply_backflip_assistive_wrench(
     not change the intended backward direction. Strict evaluation initializes
     the scale to zero. When configured, the bounded damping torque activates
     only after a full measured airborne revolution and a valid feet-first
-    landing latch. Both damping parameters default to zero and all harness
-    values are recorded by the evaluator. The step event also writes zero
-    outside active windows so MuJoCo never retains a stale wrench.
+    landing latch. A positive duration bounds the impact-assistance window;
+    zero retains the harness for the rest of the episode. All damping controls
+    default to zero and are recorded by the evaluator. The step event also
+    writes zero outside active windows so MuJoCo never retains a stale wrench.
     """
     del env_ids  # Step-mode event always applies to all worlds.
     zeros = torch.zeros(env.num_envs, device=env.device)
@@ -7665,8 +7670,15 @@ def apply_backflip_assistive_wrench(
         landed = getattr(env, "_backflip_landed_latch", None)
         rotation = getattr(env, "_backflip_max", None)
         if landed is not None and rotation is not None:
+            harness_steps = env._backflip_landing_harness_steps
+            within_duration = torch.ones_like(landed)
+            if landing_damping_duration_s > 0.0:
+                within_duration = (
+                    harness_steps.to(torch.float32) * float(env.step_dt)
+                    < float(landing_damping_duration_s)
+                )
             harness_active = (
-                landed & (rotation >= 2.0 * math.pi)
+                landed & (rotation >= 2.0 * math.pi) & within_duration
             ).to(dtype) * scale
             damping_b = (
                 -float(landing_damping_gain_nm_per_rad_s)
@@ -7680,6 +7692,11 @@ def apply_backflip_assistive_wrench(
             )
             damping_b = damping_b * damping_scale * harness_active.unsqueeze(1)
             torque_w += quat_apply(asset.data.root_link_quat_w, damping_b)
+            env._backflip_landing_harness_steps = torch.where(
+                landed,
+                harness_steps + 1,
+                torch.zeros_like(harness_steps),
+            )
     asset.write_external_wrench_to_sim(
         forces=force.unsqueeze(1),
         torques=torque_w.unsqueeze(1),
@@ -8079,6 +8096,7 @@ def reset_backflip_state(
     env._backflip_max_stable_steps[env_ids] = 0
     env._backflip_paid_stable_steps[env_ids] = 0
     env._backflip_stable_latch[env_ids] = False
+    env._backflip_landing_harness_steps[env_ids] = 0
     env._backflip_assist_eligible[env_ids] = ~(is_mid | is_recovery)
     env._backflip_assist_initialized[env_ids] = True
     env._backflip_phase_offset_s[env_ids] = 0.0

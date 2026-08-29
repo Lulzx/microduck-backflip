@@ -123,6 +123,7 @@ def evaluate(
     post_landing_delay_s: float = 0.0,
     landing_damping_gain: float = 0.0,
     landing_damping_max_nm: float = 0.0,
+    landing_damping_duration_s: float = 0.0,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -196,10 +197,15 @@ def evaluate(
         assist_cfg["start_time_s"] = assist_start_s
     if assist_end_s is not None:
         assist_cfg["end_time_s"] = assist_end_s
-    if landing_damping_gain < 0.0 or landing_damping_max_nm < 0.0:
+    if (
+        landing_damping_gain < 0.0
+        or landing_damping_max_nm < 0.0
+        or landing_damping_duration_s < 0.0
+    ):
         raise ValueError("landing damping parameters must be non-negative")
     assist_cfg["landing_damping_gain_nm_per_rad_s"] = landing_damping_gain
     assist_cfg["landing_damping_max_nm"] = landing_damping_max_nm
+    assist_cfg["landing_damping_duration_s"] = landing_damping_duration_s
     if start_mode == "crouch":
         reset = env_cfg.events["set_backflip_state"].params
         reset["standing_prob"] = 0.0
@@ -834,6 +840,7 @@ def evaluate(
             "end_time_s": assist_cfg["end_time_s"],
             "landing_damping_gain_nm_per_rad_s": landing_damping_gain,
             "landing_damping_max_nm": landing_damping_max_nm,
+            "landing_damping_duration_s": landing_damping_duration_s,
         },
         "stable_hold_s": STABLE_HOLD_S,
         "landing_surface": (
@@ -1038,6 +1045,12 @@ def main() -> None:
         help="Maximum post-360 harness damping torque",
     )
     parser.add_argument(
+        "--landing-damping-duration-s",
+        type=float,
+        default=0.0,
+        help="Limit landing harness duration; zero means the remaining episode",
+    )
+    parser.add_argument(
         "--mat-height-m",
         type=float,
         help="Override the landing-mat top height for a mat task",
@@ -1171,6 +1184,7 @@ def main() -> None:
         args.post_landing_delay_s,
         args.landing_damping_gain,
         args.landing_damping_max_nm,
+        args.landing_damping_duration_s,
     )
 
 
