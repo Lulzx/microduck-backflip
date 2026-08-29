@@ -211,6 +211,8 @@ def test_reference_task_uses_captured_full_launch_states():
     assert {len(row["qpos_local"]) for row in payload["snapshots"]} == {21}
     assert {len(row["qvel"]) for row in payload["snapshots"]} == {20}
     assert "backflip_spawn_mix" not in cfg.curriculum
+    assert cfg.rewards["backflip_post_landing_angular_speed"].weight < 0.0
+    assert cfg.rewards["backflip_landing_stillness"].weight >= 300.0
 
 
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():

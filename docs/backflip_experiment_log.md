@@ -623,6 +623,50 @@ WARP_NUM_THREADS=12 .venv/bin/python scripts/eval_backflip.py \
   --output results/research_pedestal_braking_v34_model225_assisted_256_snapshot_seed42.json
 ```
 
+**2026-08-29 19:29-19:51 IST — v35/v36 reference landing continuation.**
+
+- The first reference-state continuation ran through model 350 in
+  `logs/rsl_rl/microduck_backflip_reference/2026-08-29_19-29-46_actual-trajectory-rsi-v1-256`.
+  Models 250, 275, 300, 325, and 350 all retained 64/64 full revolutions, but
+  none met the 0.5 s strict hold. Low-angular-speed incidence improved from
+  6/64 at model 250 to 11/64 at models 325 and 350; maximum strict hold peaked
+  at 0.04 s. The run therefore exposed a post-impact energy plateau rather
+  than solving the landing.
+- The stillness Gaussian was nearly zero at the observed 14–18 rad/s contact
+  speeds, so v36 adds a dense, landed-latch-gated linear angular-speed cost,
+  increases stillness/stability/success weights, lowers PPO learning rate to
+  3e-4, and lowers entropy to 0.002. Focused validation is 39 passed; a
+  16-world smoke update produced finite, nonzero stillness, damping, and
+  stability-progress returns.
+- The continuation run is
+  `logs/rsl_rl/microduck_backflip_reference/2026-08-29_19-44-13_postimpact-damping-v2-256`.
+  In a deterministic 64-world seed-42 battery, model 380 is the current best:
+  64/64 full revolutions, 64/64 landing latches, 59/64 first contacts on a
+  foot, 14/64 ever below 2 rad/s, 0/64 strict successes, 0.18 s maximum strict
+  hold, and 0.40 s maximum posture hold. Its best trajectory is environment
+  49: 392.72° rotation, feet-first contact, and the same 0.18 s strict hold.
+  Model 420 regressed to a 0.04 s maximum strict hold, so it was not promoted.
+- Verified video:
+  `results/videos/v36-reference-model380-best-env49/backflip-model_380-task-step-0.mp4`
+  (H.264/yuv420p, 1280x720, 50 fps, 4.0 s). The associated trace and complete
+  evaluation are in the same directory. It begins from the captured
+  approximately 260° late-flight state and neighboring vectorized worlds are
+  visible, so it is evidence for the landing curriculum only—not a complete
+  cube-start backflip video.
+
+Evaluation command:
+
+```bash
+WARP_NUM_THREADS=2 .venv/bin/python scripts/eval_backflip.py \
+  logs/rsl_rl/microduck_backflip_reference/2026-08-29_19-44-13_postimpact-damping-v2-256/model_380.pt \
+  --task-id Mjlab-BackflipReference-Pedestal-MicroDuck \
+  --num-envs 64 --seed 42 --start-mode task --assist-scale 0 \
+  --render-env-index 49 \
+  --video-dir results/videos/v36-reference-model380-best-env49 \
+  --trace-output results/videos/v36-reference-model380-best-env49/trace.json \
+  --output results/videos/v36-reference-model380-best-env49/evaluation.json
+```
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

@@ -8557,6 +8557,27 @@ def backflip_landing_stillness(
     return score * env._backflip_landed_latch.float()
 
 
+def backflip_post_landing_angular_speed_cost(
+    env: ManagerBasedRlEnv,
+    speed_scale: float = 20.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Dense normalized angular-speed cost after a valid feet-first latch.
+
+    The positive Gaussian stillness score is effectively zero at the measured
+    14--18 rad/s impacts, leaving PPO unable to rank two bad touchdowns. This
+    linear capture-basin cost preserves ordering throughout that range while
+    the unchanged strict gate still requires less than 2 rad/s.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    _update_backflip_state(env, asset)
+    speed = torch.linalg.vector_norm(
+        torch.nan_to_num(asset.data.root_link_ang_vel_b, nan=0.0), dim=-1
+    )
+    cost = torch.clamp(speed / max(float(speed_scale), 1e-6), 0.0, 1.0)
+    return cost * env._backflip_landed_latch.float()
+
+
 def backflip_landing_foot_support(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,

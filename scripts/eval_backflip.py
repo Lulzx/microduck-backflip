@@ -640,6 +640,26 @@ def evaluate(
             }
         )
 
+    top_stability_indices = torch.topk(
+        max_stable_steps, k=min(5, num_envs), largest=True
+    ).indices.tolist()
+    top_stability_trials = [
+        {
+            "environment_index": index,
+            "strict_stable_hold_s": float(
+                (max_stable_steps[index].float() * base_env.step_dt).item()
+            ),
+            "posture_hold_s": float(
+                (max_posture_steps[index].float() * base_env.step_dt).item()
+            ),
+            "rotation_deg": float(torch.rad2deg(peak_rotation[index]).item()),
+            "first_ground_contact_was_feet": bool(
+                first_ground_contact_was_feet[index].item()
+            ),
+        }
+        for index in top_stability_indices
+    ]
+
     result = {
         "task": task_id,
         "checkpoint": str(checkpoint.resolve()),
@@ -708,6 +728,7 @@ def evaluate(
             max_stable_steps.float() * base_env.step_dt
         ),
         "top_rotation_trials": top_rotation_trials,
+        "top_stability_trials": top_stability_trials,
         "peak_height_m": _summary(peak_z),
         "peak_airborne_rotation_deg": _summary(torch.rad2deg(peak_rotation)),
         "peak_angular_speed_rad_s": _summary(peak_ang_vel),

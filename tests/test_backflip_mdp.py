@@ -209,6 +209,16 @@ def test_landing_phase_components_remain_dense_when_one_factor_is_bad():
     assert mdp.backflip_landing_foot_support(env).item() == 1.0
 
 
+def test_post_landing_angular_speed_cost_ranks_high_spin_contacts():
+    env, asset = _fake_env()
+    mdp._backflip_state(env)
+    asset.data.root_link_ang_vel_b[0, 1] = 10.0
+    assert mdp.backflip_post_landing_angular_speed_cost(env).item() == 0.0
+    env._backflip_landed_latch[:] = True
+    cost = mdp.backflip_post_landing_angular_speed_cost(env, speed_scale=20.0)
+    assert torch.isclose(cost, torch.tensor([0.5])).all()
+
+
 def test_stability_progress_only_pays_for_a_new_hold_frontier():
     env, asset = _fake_env()
     mdp._backflip_state(env)

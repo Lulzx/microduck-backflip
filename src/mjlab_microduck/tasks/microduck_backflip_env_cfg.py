@@ -803,6 +803,15 @@ def make_microduck_backflip_reference_env_cfg(play: bool = False):
         },
     )
     cfg.curriculum.pop("backflip_spawn_mix", None)
+    cfg.rewards["backflip_landing_stillness"].weight = 300.0
+    cfg.rewards["backflip_landing_stillness"].params["angular_speed_std"] = 8.0
+    cfg.rewards["backflip_post_landing_angular_speed"] = RewardTermCfg(
+        func=microduck_mdp.backflip_post_landing_angular_speed_cost,
+        weight=-200.0,
+        params={"speed_scale": 20.0},
+    )
+    cfg.rewards["backflip_stability_progress"].weight = 400.0
+    cfg.rewards["backflip_success"].weight = 400.0
     return cfg
 
 
@@ -838,3 +847,5 @@ MicroduckBackflipPedestalBrakingRlCfg.run_name = (
 MicroduckBackflipReferenceRlCfg = deepcopy(MicroduckBackflipRlCfg)
 MicroduckBackflipReferenceRlCfg.experiment_name = "microduck_backflip_reference"
 MicroduckBackflipReferenceRlCfg.run_name = "microduck_backflip_reference"
+MicroduckBackflipReferenceRlCfg.algorithm.learning_rate = 3.0e-4
+MicroduckBackflipReferenceRlCfg.algorithm.entropy_coef = 0.002
