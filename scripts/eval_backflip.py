@@ -109,6 +109,7 @@ def evaluate(
     recovery_approach_height_m: float = 0.36,
     snapshot_output: Path | None = None,
     snapshot_angle_deg: float = 260.0,
+    snapshot_event: str = "angle",
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -125,6 +126,8 @@ def evaluate(
         configure_backflip_standing_eval(env_cfg)
     if assist_scale < 0.0 or assist_scale > 1.0:
         raise ValueError("assist_scale must be in [0, 1]")
+    if snapshot_event not in {"angle", "landing"}:
+        raise ValueError("snapshot_event must be 'angle' or 'landing'")
     if not 0.0 <= recovery_approach_angle_deg <= 360.0:
         raise ValueError("recovery_approach_angle_deg must be in [0, 360]")
     if not 0.0 <= recovery_approach_tilt_deg <= 180.0:
@@ -300,6 +303,24 @@ def evaluate(
     body_contact_time = torch.full_like(takeoff_time, float("nan"))
     first_ground_contact_time = torch.full_like(takeoff_time, float("nan"))
     rotation_at_first_ground_contact = torch.full_like(takeoff_time, float("nan"))
+    vertical_velocity_at_first_ground_contact = torch.full_like(
+        takeoff_time, float("nan")
+    )
+    angular_speed_at_first_ground_contact = torch.full_like(
+        takeoff_time, float("nan")
+    )
+    backward_pitch_rate_at_first_ground_contact = torch.full_like(
+        takeoff_time, float("nan")
+    )
+    height_at_first_ground_contact = torch.full_like(takeoff_time, float("nan"))
+    upright_tilt_at_first_ground_contact = torch.full_like(
+        takeoff_time, float("nan")
+    )
+    rotation_at_landing_latch = torch.full_like(takeoff_time, float("nan"))
+    vertical_velocity_at_landing_latch = torch.full_like(takeoff_time, float("nan"))
+    angular_speed_at_landing_latch = torch.full_like(takeoff_time, float("nan"))
+    height_at_landing_latch = torch.full_like(takeoff_time, float("nan"))
+    upright_tilt_at_landing_latch = torch.full_like(takeoff_time, float("nan"))
     first_ground_contact_was_feet = torch.zeros_like(launched)
     rotation_300_time = torch.full_like(takeoff_time, float("nan"))
     landing_time = torch.full_like(takeoff_time, float("nan"))
@@ -338,15 +359,22 @@ def evaluate(
             launched_now = base_env._backflip_airborne_latch
             landed_now = base_env._backflip_landed_latch
             if snapshot_output is not None:
-                snapshot_now = (
-                    launched_now
-                    & ~base_env._backflip_flight_ended_latch
-                    & ~snapshot_taken
-                    & (
-                        base_env._backflip_max
-                        >= math.radians(snapshot_angle_deg)
+                if snapshot_event == "landing":
+                    snapshot_now = (
+                        landed_now
+                        & (base_env._backflip_max >= 2 * math.pi)
+                        & ~snapshot_taken
                     )
-                )
+                else:
+                    snapshot_now = (
+                        launched_now
+                        & ~base_env._backflip_flight_ended_latch
+                        & ~snapshot_taken
+                        & (
+                            base_env._backflip_max
+                            >= math.radians(snapshot_angle_deg)
+                        )
+                    )
                 snapshot_ids = torch.nonzero(snapshot_now, as_tuple=False).flatten()
                 if snapshot_ids.numel() > 0:
                     qpos = base_env.sim.data.qpos[snapshot_ids].detach().clone()
@@ -478,11 +506,39 @@ def evaluate(
             body_contact_time[first_body_contact] = now
             body_contact |= body_contact_now
             landing_eligible = base_env._backflip_landed_latch & (
-                base_env._backflip_max >= math.radians(340.0)
+                base_env._backflip_max >= 2 * math.pi
             )
             upright_ok = upright > math.cos(math.radians(20.0))
             height_ok = height >= 0.095
             angular_speed = robot.root_link_ang_vel_b.norm(dim=-1)
+            vertical_velocity_at_first_ground_contact[first_ground_contact] = (
+                robot.root_link_lin_vel_w[first_ground_contact, 2]
+            )
+            angular_speed_at_first_ground_contact[first_ground_contact] = (
+                angular_speed[first_ground_contact]
+            )
+            backward_pitch_rate_at_first_ground_contact[first_ground_contact] = (
+                pitch_rate_back[first_ground_contact]
+            )
+            height_at_first_ground_contact[first_ground_contact] = height[
+                first_ground_contact
+            ]
+            upright_tilt_at_first_ground_contact[first_ground_contact] = torch.acos(
+                torch.clamp(upright[first_ground_contact], -1.0, 1.0)
+            )
+            rotation_at_landing_latch[first_landing] = base_env._backflip_max[
+                first_landing
+            ]
+            vertical_velocity_at_landing_latch[first_landing] = (
+                robot.root_link_lin_vel_w[first_landing, 2]
+            )
+            angular_speed_at_landing_latch[first_landing] = angular_speed[
+                first_landing
+            ]
+            height_at_landing_latch[first_landing] = height[first_landing]
+            upright_tilt_at_landing_latch[first_landing] = torch.acos(
+                torch.clamp(upright[first_landing], -1.0, 1.0)
+            )
             low_angular_speed = angular_speed < 2.0
             ever_landing_feet |= landing_eligible & feet_now
             ever_landing_upright |= landing_eligible & upright_ok
@@ -702,6 +758,9 @@ def evaluate(
             "airborne_rotation_ge_340deg": float(rotated_340.float().mean().item()),
             "airborne_rotation_ge_360deg": float(rotated_360.float().mean().item()),
             "feet_first_landing": float(landed.float().mean().item()),
+            "full_revolution_feet_first_landing": float(
+                (landed & rotated_360).float().mean().item()
+            ),
             "stable_landing": float(stable.float().mean().item()),
             "body_only_ground_contact": float(body_contact.float().mean().item()),
             "first_ground_contact_was_feet": float(
@@ -758,6 +817,34 @@ def evaluate(
         "rotation_at_first_ground_contact_deg": _finite_time_summary(
             torch.rad2deg(rotation_at_first_ground_contact)
         ),
+        "vertical_velocity_at_first_ground_contact_m_s": _finite_time_summary(
+            vertical_velocity_at_first_ground_contact
+        ),
+        "angular_speed_at_first_ground_contact_rad_s": _finite_time_summary(
+            angular_speed_at_first_ground_contact
+        ),
+        "backward_pitch_rate_at_first_ground_contact_rad_s": _finite_time_summary(
+            backward_pitch_rate_at_first_ground_contact
+        ),
+        "height_at_first_ground_contact_m": _finite_time_summary(
+            height_at_first_ground_contact
+        ),
+        "upright_tilt_at_first_ground_contact_deg": _finite_time_summary(
+            torch.rad2deg(upright_tilt_at_first_ground_contact)
+        ),
+        "rotation_at_landing_latch_deg": _finite_time_summary(
+            torch.rad2deg(rotation_at_landing_latch)
+        ),
+        "vertical_velocity_at_landing_latch_m_s": _finite_time_summary(
+            vertical_velocity_at_landing_latch
+        ),
+        "angular_speed_at_landing_latch_rad_s": _finite_time_summary(
+            angular_speed_at_landing_latch
+        ),
+        "height_at_landing_latch_m": _finite_time_summary(height_at_landing_latch),
+        "upright_tilt_at_landing_latch_deg": _finite_time_summary(
+            torch.rad2deg(upright_tilt_at_landing_latch)
+        ),
         "timing_s": {
             "takeoff": _finite_time_summary(takeoff_time),
             "first_ground_contact": _finite_time_summary(first_ground_contact_time),
@@ -800,6 +887,7 @@ def evaluate(
             "assist_scale": assist_scale,
             "episodes": num_envs,
             "capture_angle_deg": snapshot_angle_deg,
+            "capture_event": snapshot_event,
             "step_dt_s": base_env.step_dt,
             "qpos_coordinates": "root_xyz_relative_to_terrain_origin",
             "snapshots": snapshots,
@@ -894,6 +982,12 @@ def main() -> None:
         default=260.0,
         help="Airborne rotation threshold for reference-state capture",
     )
+    parser.add_argument(
+        "--snapshot-event",
+        choices=("angle", "landing"),
+        default="angle",
+        help="Capture an airborne angle crossing or a full-revolution landing latch",
+    )
     args = parser.parse_args()
     evaluate(
         args.checkpoint,
@@ -919,6 +1013,7 @@ def main() -> None:
         args.recovery_approach_height_m,
         args.snapshot_output,
         args.snapshot_angle_deg,
+        args.snapshot_event,
     )
 
 

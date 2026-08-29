@@ -7740,13 +7740,15 @@ def _update_backflip_state(env: ManagerBasedRlEnv, asset: Entity) -> None:
 
     # Curriculum success and strict evaluation share exactly the same stable
     # hold definition. A transient upright foot touch followed by a fall must
-    # neither earn success nor remove assistance.
+    # neither earn success nor remove assistance.  The earlier 340-degree
+    # tolerance leaked success to controlled under-rotations on raised landing
+    # surfaces; a backflip must complete the full airborne revolution.
     ang = torch.linalg.vector_norm(
         torch.nan_to_num(asset.data.root_link_ang_vel_b, nan=0.0), dim=-1
     )
     stable_now = (
         env._backflip_landed_latch
-        & (env._backflip_max >= math.radians(340.0))
+        & (env._backflip_max >= 2 * math.pi)
         & feet
         & (_backflip_upright(asset) > math.cos(math.radians(20.0)))
         & (z >= 0.095)
@@ -8083,6 +8085,10 @@ def _load_backflip_reference_states(path: str) -> dict[str, torch.Tensor]:
         "phase_time": torch.tensor(
             [record["time_s"] for record in records], dtype=torch.float32
         ),
+        "previous_action": torch.tensor(
+            [record.get("previous_action", [0.0] * 14) for record in records],
+            dtype=torch.float32,
+        ),
     }
     _BACKFLIP_REFERENCE_CACHE[resolved] = cached
     return cached
@@ -8093,6 +8099,9 @@ def reset_backflip_reference_state(
     env_ids: torch.Tensor,
     reference_state_path: str,
     landing_min_horizontal_distance: float = 0.0,
+    landing_latched: bool = False,
+    local_phase: bool = False,
+    restore_previous_action: bool = False,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ):
     """Reset from full simulator states captured on the real launch policy.
@@ -8155,15 +8164,90 @@ def reset_backflip_reference_state(
     env._backflip_paid_z[env_ids] = qpos[:, 2]
     env._backflip_had_support[env_ids] = True
     env._backflip_airborne_latch[env_ids] = True
-    env._backflip_flight_ended_latch[env_ids] = False
-    env._backflip_landed_latch[env_ids] = False
+    env._backflip_flight_ended_latch[env_ids] = landing_latched
+    env._backflip_landed_latch[env_ids] = landing_latched
     env._backflip_stable_steps[env_ids] = 0
     env._backflip_max_stable_steps[env_ids] = 0
     env._backflip_paid_stable_steps[env_ids] = 0
     env._backflip_stable_latch[env_ids] = False
     env._backflip_assist_eligible[env_ids] = False
     env._backflip_assist_initialized[env_ids] = True
-    env._backflip_phase_offset_s[env_ids] = phase_time
+    env._backflip_phase_offset_s[env_ids] = 0.0 if local_phase else phase_time
+    if restore_previous_action and hasattr(env, "action_manager"):
+        previous_action = references["previous_action"][choice.cpu()].to(env.device)
+        manager = env.action_manager
+        if previous_action.shape[1] != manager.action.shape[1]:
+            raise ValueError(
+                f"Reference action width {previous_action.shape[1]} does not match "
+                f"action width {manager.action.shape[1]}"
+            )
+        manager._action[env_ids] = previous_action
+        manager._prev_action[env_ids] = previous_action
+        manager._prev_prev_action[env_ids] = previous_action
+
+
+def reset_backflip_landing_reference_state(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    reference_state_path: str,
+    landing_min_horizontal_distance: float = 0.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+):
+    """Reset to captured full-revolution foot-contact states for recovery RSI."""
+    reset_backflip_reference_state(
+        env,
+        env_ids,
+        reference_state_path=reference_state_path,
+        landing_min_horizontal_distance=landing_min_horizontal_distance,
+        landing_latched=True,
+        local_phase=True,
+        restore_previous_action=True,
+        asset_cfg=asset_cfg,
+    )
+
+
+def reset_backflip_mixed_reference_state(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    flight_reference_state_path: str,
+    landing_reference_state_path: str,
+    landing_probability: float = 0.5,
+    landing_min_horizontal_distance: float = 0.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+):
+    """Mix real apex and touchdown states in one actor's training batch.
+
+    The flight half retains the captured global phase and learns approach
+    shaping.  The landing half starts a local recovery phase, restores the
+    action-history observation, and seeds the full-revolution landing latch.
+    Training both distributions together lets landing gradients update the
+    same actor that chooses the pre-impact pose, avoiding a brittle policy
+    hand-off at contact.
+    """
+    if env_ids is None or len(env_ids) == 0:
+        return
+    if not 0.0 <= landing_probability <= 1.0:
+        raise ValueError("landing_probability must be in [0, 1]")
+    env_ids = env_ids.to(env.device, dtype=torch.long)
+    landing_mask = torch.rand(len(env_ids), device=env.device) < landing_probability
+    flight_ids = env_ids[~landing_mask]
+    landing_ids = env_ids[landing_mask]
+    if len(flight_ids) > 0:
+        reset_backflip_reference_state(
+            env,
+            flight_ids,
+            reference_state_path=flight_reference_state_path,
+            landing_min_horizontal_distance=landing_min_horizontal_distance,
+            asset_cfg=asset_cfg,
+        )
+    if len(landing_ids) > 0:
+        reset_backflip_landing_reference_state(
+            env,
+            landing_ids,
+            reference_state_path=landing_reference_state_path,
+            landing_min_horizontal_distance=landing_min_horizontal_distance,
+            asset_cfg=asset_cfg,
+        )
 
 
 def backflip_rotation_progress(
@@ -8502,7 +8586,8 @@ def backflip_landing_composite(
         target_overrides=target_overrides,
         asset_cfg=asset_cfg,
     )
-    return score * env._backflip_landed_latch.float()
+    completed = env._backflip_max >= 2 * math.pi
+    return score * (env._backflip_landed_latch & completed).float()
 
 
 def backflip_landing_upright(
@@ -8518,7 +8603,8 @@ def backflip_landing_upright(
     asset: Entity = env.scene[asset_cfg.name]
     _update_backflip_state(env, asset)
     upright = torch.clamp(_backflip_upright(asset), min=0.0, max=1.0)
-    return upright * env._backflip_landed_latch.float()
+    completed = env._backflip_max >= 2 * math.pi
+    return upright * (env._backflip_landed_latch & completed).float()
 
 
 def backflip_landing_height(
@@ -8539,7 +8625,8 @@ def backflip_landing_height(
         min=0.0,
         max=1.0,
     )
-    return score * env._backflip_landed_latch.float()
+    completed = env._backflip_max >= 2 * math.pi
+    return score * (env._backflip_landed_latch & completed).float()
 
 
 def backflip_landing_stillness(
@@ -8554,7 +8641,8 @@ def backflip_landing_stillness(
         asset.data.root_link_ang_vel_b, nan=0.0
     ).square().sum(dim=-1)
     score = torch.exp(-angular_speed_sq / max(angular_speed_std**2, 1e-6))
-    return score * env._backflip_landed_latch.float()
+    completed = env._backflip_max >= 2 * math.pi
+    return score * (env._backflip_landed_latch & completed).float()
 
 
 def backflip_post_landing_angular_speed_cost(
@@ -8575,7 +8663,8 @@ def backflip_post_landing_angular_speed_cost(
         torch.nan_to_num(asset.data.root_link_ang_vel_b, nan=0.0), dim=-1
     )
     cost = torch.clamp(speed / max(float(speed_scale), 1e-6), 0.0, 1.0)
-    return cost * env._backflip_landed_latch.float()
+    completed = env._backflip_max >= 2 * math.pi
+    return cost * (env._backflip_landed_latch & completed).float()
 
 
 def backflip_landing_foot_support(
@@ -8588,7 +8677,8 @@ def backflip_landing_foot_support(
     feet = _sensor_any_contact(env, _BACKFLIP_FEET_SENSOR)
     if feet is None:
         return torch.zeros(env.num_envs, device=env.device)
-    return feet.float() * env._backflip_landed_latch.float()
+    completed = env._backflip_max >= 2 * math.pi
+    return feet.float() * (env._backflip_landed_latch & completed).float()
 
 
 def backflip_stability_progress(
@@ -8745,6 +8835,57 @@ def backflip_late_pitch_rate_cost(
     active = (env._backflip_airborne_latch & ~env._backflip_flight_ended_latch).float()
     gate = _backflip_progress_gate(env, gate_lo, gate_hi)
     return (omega_back / max(rate_scale, 1e-6)).square() * gate * active
+
+
+def backflip_rotation_timing_cost(
+    env: ManagerBasedRlEnv,
+    target_angle: float = 2 * math.pi,
+    target_height: float = 0.115,
+    gate_lo: float = math.radians(170.0),
+    gate_hi: float = math.radians(220.0),
+    rate_error_scale: float = 8.0,
+    gravity: float = 9.81,
+    minimum_time_s: float = 0.04,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Match pitch rate to the remaining ballistic time before foot contact.
+
+    A blanket late-spin penalty can teach under-rotation.  Instead, estimate
+    when the root will fall to standing height under gravity and divide the
+    remaining revolution by that time.  The actor is penalized for deviation
+    from this physically feasible arrival rate while airborne.  It may use
+    asymmetric limbs or a mild corkscrew; only backward pitch timing is scored.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    _update_backflip_state(env, asset)
+    origins = env.scene.terrain.env_origins
+    height = asset.data.root_link_pos_w[:, 2] - origins[:, 2]
+    vertical_velocity = asset.data.root_link_lin_vel_w[:, 2]
+    acceleration = max(float(gravity), 1e-6)
+    height_remaining = torch.clamp(height - target_height, min=0.0)
+    discriminant = torch.clamp(
+        vertical_velocity.square() + 2.0 * acceleration * height_remaining,
+        min=0.0,
+    )
+    time_to_height = (
+        vertical_velocity + torch.sqrt(discriminant)
+    ) / acceleration
+    time_to_height = torch.clamp(time_to_height, min=minimum_time_s)
+
+    remaining_angle = torch.clamp(target_angle - env._backflip_accum, min=0.0)
+    target_rate = remaining_angle / time_to_height
+    omega_back = torch.clamp(
+        torch.nan_to_num(
+            _BACKFLIP_SIGN * asset.data.root_link_ang_vel_b[:, 1], nan=0.0
+        ),
+        min=0.0,
+    )
+    error = (omega_back - target_rate) / max(rate_error_scale, 1e-6)
+    gate = _backflip_progress_gate(env, gate_lo, gate_hi)
+    active = (
+        env._backflip_airborne_latch & ~env._backflip_flight_ended_latch
+    ).float()
+    return error.square() * gate * active
 
 
 def backflip_rotation_overshoot_cost(

@@ -186,11 +186,18 @@ def test_success_requires_continuous_half_second_stable_hold():
 
     env.common_step_counter = 25
     mdp._update_backflip_state(env, asset)
+    assert mdp.backflip_success(env).item() == 0.0
+
+    # Under-rotation cannot be converted into strict success by standing still.
+    env._backflip_max[:] = 2 * math.pi
+    for step in range(26, 51):
+        env.common_step_counter = step
+        mdp._update_backflip_state(env, asset)
     assert mdp.backflip_success(env).item() == 1.0
 
     # Once proven, success remains latched even if the robot later moves.
     asset.data.root_link_ang_vel_b[0, 1] = 4.0
-    env.common_step_counter = 26
+    env.common_step_counter = 51
     mdp._update_backflip_state(env, asset)
     assert mdp.backflip_success(env).item() == 1.0
 
@@ -199,6 +206,7 @@ def test_landing_phase_components_remain_dense_when_one_factor_is_bad():
     env, asset = _fake_env()
     mdp._backflip_state(env)
     env._backflip_landed_latch[:] = True
+    env._backflip_max[:] = 2 * math.pi
 
     # A low body height no longer erases the independent upright, stillness,
     # and foot-support objectives.
@@ -215,6 +223,7 @@ def test_post_landing_angular_speed_cost_ranks_high_spin_contacts():
     asset.data.root_link_ang_vel_b[0, 1] = 10.0
     assert mdp.backflip_post_landing_angular_speed_cost(env).item() == 0.0
     env._backflip_landed_latch[:] = True
+    env._backflip_max[:] = 2 * math.pi
     cost = mdp.backflip_post_landing_angular_speed_cost(env, speed_scale=20.0)
     assert torch.isclose(cost, torch.tensor([0.5])).all()
 
@@ -225,7 +234,7 @@ def test_stability_progress_only_pays_for_a_new_hold_frontier():
     env._backflip_had_support[:] = True
     env._backflip_airborne_latch[:] = True
     env._backflip_landed_latch[:] = True
-    env._backflip_max[:] = torch.deg2rad(torch.tensor([350.0]))
+    env._backflip_max[:] = torch.deg2rad(torch.tensor([360.0]))
     _contacts(env, feet=True, robot=True)
 
     first_streak = []
@@ -419,3 +428,32 @@ def test_feasible_push_reserves_credit_for_high_energy_coupled_launch():
     asset2.data.root_link_ang_vel_b[0, 1] = 0.0
     straight_jump = mdp.backflip_feasible_push_progress(env2)
     assert straight_jump.item() == 0.0
+
+
+def test_rotation_timing_matches_remaining_angle_to_ballistic_contact():
+    env, asset = _fake_env()
+    asset.data.root_link_pos_w[0, 2] = 0.515
+    asset.data.root_link_lin_vel_w = torch.tensor([[0.0, 0.0, -0.18]])
+    mdp._backflip_state(env)
+    env._backflip_accum[:] = math.pi
+    env._backflip_max[:] = math.pi
+    env._backflip_airborne_latch[:] = True
+    env._backflip_flight_ended_latch[:] = False
+    _contacts(env, feet=False, robot=False)
+    env._backflip_last_update_step = env.common_step_counter
+
+    time_to_height = (
+        -0.18 + math.sqrt((-0.18) ** 2 + 2.0 * 9.81 * (0.515 - 0.115))
+    ) / 9.81
+    target_rate = math.pi / time_to_height
+    asset.data.root_link_ang_vel_b[0, 1] = -target_rate
+    matched = mdp.backflip_rotation_timing_cost(env, gate_lo=0.0, gate_hi=0.1)
+    assert matched.item() < 1e-6
+
+    asset.data.root_link_ang_vel_b[0, 1] = -(target_rate + 8.0)
+    overspeed = mdp.backflip_rotation_timing_cost(env, gate_lo=0.0, gate_hi=0.1)
+    assert torch.isclose(overspeed, torch.tensor([1.0]), atol=1e-5).all()
+
+    env._backflip_flight_ended_latch[:] = True
+    inactive = mdp.backflip_rotation_timing_cost(env, gate_lo=0.0, gate_hi=0.1)
+    assert inactive.item() == 0.0

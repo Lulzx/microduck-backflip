@@ -22,8 +22,11 @@ The task state machine requires all of the following, in order:
    forward rotation cannot advance the frontier, and corkscrew rotation is
    continuously attenuated.
 4. At least 320 degrees of airborne backward rotation occurred before an
-   upright feet contact can latch a landing.
-5. Evaluation separately requires the robot to remain continuously on its
+   upright feet contact can latch a landing phase. This latch grants no final
+   landing reward and cannot pass evaluation until the frozen airborne
+   frontier reaches a true 360 degrees.
+5. Evaluation requires a true 360-degree airborne revolution and then the
+   robot to remain continuously on its
    feet for 0.5 seconds, within 20 degrees of upright, above 0.095 m trunk
    height, and below 2 rad/s angular speed. A transient feet touch followed by
    a fall is not a stable success.
@@ -104,6 +107,29 @@ Unassisted reverse-curriculum worlds retain full authority regardless of the
 global stage. Assistance can decay only after the same continuous 0.5-second
 stable hold used by the evaluator; a one-frame feet touch is not curriculum
 success.
+
+`Mjlab-BackflipReferenceEarly-Pedestal-MicroDuck` moves the reference slice
+back to the real launch actor's 180-degree apex crossing, giving the policy
+about 0.27 s to untuck and remove angular energy. The mat variant lands onto a
+raised 18 cm compliant surface, 7 cm below the cube top. This is an explicitly
+easier curriculum milestone, not a replacement for the cube-to-floor or flat
+task.
+
+`Mjlab-BackflipReferenceMatLanding-Pedestal-MicroDuck` samples exact
+full-revolution foot-contact simulator states and trains only the recovery
+half. It restores action history and uses a local phase. Checkpoint 530 has
+demonstrated the strict 0.5 s hold on 2/64 captured-touchdown trials, but that
+does not count as a complete flip. `Mjlab-BackflipReferenceMatMixed-Pedestal-
+MicroDuck` trains one actor on a 50/50 mixture of the real apex states and
+those exact touchdown states so approach and recovery gradients can be
+distilled into a single policy before returning to full cube starts.
+
+Current verified curriculum milestone: mixed-training checkpoint 510,
+evaluated with `WARP_NUM_THREADS=1`, has 2/64 strict successes at seed 45.
+The best completes 369.49 degrees and holds every landing predicate for 2.02
+seconds. This is reproducible apex-to-compliant-mat evidence. It is explicitly
+not a complete takeoff from the cube, an unassisted flat-ground result, or
+physical-robot evidence.
 
 ## Reproduce training
 

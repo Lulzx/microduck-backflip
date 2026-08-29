@@ -20,6 +20,7 @@ from mjlab.terrains.terrain_generator import (
 # while leaving room for a deliberate push toward the lower floor.
 PEDESTAL_HEIGHT = 0.25
 PEDESTAL_WIDTH = 0.25
+LANDING_MAT_HEIGHT = 0.18
 
 
 @dataclass(kw_only=True)
@@ -66,6 +67,75 @@ class BackflipPedestalTerrainCfg(SubTerrainCfg):
             origin=origin,
             geometries=[
                 TerrainGeometry(geom=floor, color=(0.32, 0.38, 0.45, 1.0)),
+                TerrainGeometry(geom=pedestal, color=(0.85, 0.55, 0.12, 1.0)),
+            ],
+        )
+
+
+@dataclass(kw_only=True)
+class BackflipMatTerrainCfg(SubTerrainCfg):
+    """Launch cube surrounded by a raised, compliant gymnastics mat.
+
+    The mat is an explicit curriculum aid: its top is 7 cm below the cube and
+    its MuJoCo contact time constant is softer than the rigid lower floor.
+    Later stages can lower and stiffen it without changing the robot or policy
+    interface.
+    """
+
+    pedestal_height: float = PEDESTAL_HEIGHT
+    pedestal_width: float = PEDESTAL_WIDTH
+    landing_mat_height: float = LANDING_MAT_HEIGHT
+    floor_thickness: float = 0.10
+    mat_contact_time_s: float = 0.06
+
+    def function(
+        self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
+    ) -> TerrainOutput:
+        del difficulty, rng
+        if not 0.0 < self.landing_mat_height < self.pedestal_height:
+            raise ValueError("landing mat must be above floor and below cube top")
+        if self.pedestal_width >= min(self.size):
+            raise ValueError("pedestal must be smaller than its terrain tile")
+        body = spec.body("terrain")
+        center_x = self.size[0] / 2.0
+        center_y = self.size[1] / 2.0
+
+        floor = body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=(
+                self.size[0] / 2.0,
+                self.size[1] / 2.0,
+                self.floor_thickness / 2.0,
+            ),
+            pos=(center_x, center_y, -self.floor_thickness / 2.0),
+        )
+        mat = body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=(
+                self.size[0] / 2.0,
+                self.size[1] / 2.0,
+                self.landing_mat_height / 2.0,
+            ),
+            pos=(center_x, center_y, self.landing_mat_height / 2.0),
+            friction=(1.0, 0.005, 0.0001),
+            solref=(self.mat_contact_time_s, 1.0),
+            solimp=(0.85, 0.95, 0.001, 0.5, 2.0),
+        )
+        pedestal = body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=(
+                self.pedestal_width / 2.0,
+                self.pedestal_width / 2.0,
+                self.pedestal_height / 2.0,
+            ),
+            pos=(center_x, center_y, self.pedestal_height / 2.0),
+        )
+        origin = np.array([center_x, center_y, 0.0])
+        return TerrainOutput(
+            origin=origin,
+            geometries=[
+                TerrainGeometry(geom=floor, color=(0.20, 0.24, 0.29, 1.0)),
+                TerrainGeometry(geom=mat, color=(0.18, 0.50, 0.72, 1.0)),
                 TerrainGeometry(geom=pedestal, color=(0.85, 0.55, 0.12, 1.0)),
             ],
         )

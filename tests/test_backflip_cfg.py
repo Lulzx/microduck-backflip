@@ -16,8 +16,14 @@ from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     make_microduck_backflip_pedestal_env_cfg,
     make_microduck_backflip_pedestal_braking_env_cfg,
     make_microduck_backflip_reference_env_cfg,
+    make_microduck_backflip_early_reference_env_cfg,
+    make_microduck_backflip_mat_reference_env_cfg,
+    make_microduck_backflip_mat_landing_reference_env_cfg,
+    make_microduck_backflip_mat_mixed_reference_env_cfg,
 )
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
+    BackflipMatTerrainCfg,
+    LANDING_MAT_HEIGHT,
     PEDESTAL_HEIGHT,
     PEDESTAL_WIDTH,
 )
@@ -213,6 +219,65 @@ def test_reference_task_uses_captured_full_launch_states():
     assert "backflip_spawn_mix" not in cfg.curriculum
     assert cfg.rewards["backflip_post_landing_angular_speed"].weight < 0.0
     assert cfg.rewards["backflip_landing_stillness"].weight >= 300.0
+
+
+def test_early_reference_task_uses_apex_states_and_ballistic_timing():
+    cfg = make_microduck_backflip_early_reference_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    reference_path = Path(reset.params["reference_state_path"])
+    payload = json.loads(reference_path.read_text())
+    assert payload["capture_angle_deg"] == 180.0
+    assert len(payload["snapshots"]) >= 32
+    assert cfg.rewards["backflip_rotation_timing"].weight < 0.0
+    assert (
+        cfg.rewards["backflip_rotation_timing"].func
+        is microduck_mdp.backflip_rotation_timing_cost
+    )
+    assert cfg.rewards["backflip_prepare_landing"].params["gate_lo"] < math.radians(
+        250.0
+    )
+    assert cfg.rewards["backflip_flight_tuck"].params["fade_out"] <= math.radians(
+        250.0
+    )
+
+
+def test_mat_reference_raises_and_softens_the_landing_surface():
+    cfg = make_microduck_backflip_mat_reference_env_cfg()
+    assert cfg.sim.nconmax >= 200
+    terrains = cfg.scene.terrain.terrain_generator.sub_terrains
+    assert isinstance(terrains["backflip_mat"], BackflipMatTerrainCfg)
+    target_height = LANDING_MAT_HEIGHT + 0.115
+    assert cfg.rewards["backflip_landing"].params["target_height"] == target_height
+    assert (
+        cfg.rewards["backflip_rotation_timing"].params["target_height"]
+        == target_height
+    )
+    assert cfg.rewards["backflip_rotation_timing"].params["target_angle"] > 2 * math.pi
+    assert terrains["backflip_mat"].mat_contact_time_s > 0.02
+
+
+def test_mat_landing_reference_uses_full_revolution_contact_states():
+    cfg = make_microduck_backflip_mat_landing_reference_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    assert reset.func is microduck_mdp.reset_backflip_landing_reference_state
+    payload = json.loads(Path(reset.params["reference_state_path"]).read_text())
+    assert payload["capture_event"] == "landing"
+    assert len(payload["snapshots"]) >= 200
+    assert min(row["rotation_rad"] for row in payload["snapshots"]) >= 2 * math.pi
+    assert cfg.rewards["backflip_rotation"].weight == 0.0
+    assert cfg.rewards["backflip_rotation_timing"].weight == 0.0
+    assert cfg.rewards["backflip_stability_progress"].weight > 0.0
+
+
+def test_mat_mixed_reference_rehearses_flight_and_exact_landing():
+    cfg = make_microduck_backflip_mat_mixed_reference_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    assert reset.func is microduck_mdp.reset_backflip_mixed_reference_state
+    assert reset.params["landing_probability"] == 0.5
+    assert Path(reset.params["flight_reference_state_path"]).exists()
+    assert Path(reset.params["landing_reference_state_path"]).exists()
+    assert cfg.rewards["backflip_rotation"].weight > 0.0
+    assert cfg.rewards["backflip_success"].weight == 800.0
 
 
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():

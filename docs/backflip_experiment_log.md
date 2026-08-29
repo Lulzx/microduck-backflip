@@ -669,6 +669,113 @@ WARP_NUM_THREADS=2 .venv/bin/python scripts/eval_backflip.py \
   --output results/videos/v36-reference-model380-best-env49/evaluation.json
 ```
 
+**2026-08-29 19:52-21:00 IST — v37-v43 apex control, compliant mat, strict
+360-degree correction, exact touchdown RSI, and unified curriculum.**
+
+- v37 captured 44 real model-225 cube-launch states at the first 180-degree
+  crossing.  They occur near the ballistic apex (mean phase 0.555 s, height
+  0.514 m, vertical velocity -0.180 m/s, pitch rate -15.47 rad/s), providing
+  roughly 0.27 s of control before contact instead of 0.15 s in the earlier
+  260-degree slice.  `backflip_rotation_timing_cost` now predicts ballistic
+  time to landing height and penalizes excess pitch rate while retaining
+  asymmetric/corkscrew solutions.  The early-reference sweep through model
+  479 improved the maximum strict hold to 0.08 s and did not beat v36.
+- v38 introduced a raised compliant landing mat at 0.18 m, with the cube top
+  at 0.25 m and compliant MuJoCo contact parameters.  It reduced impact energy
+  but exposed a reward-definition defect: post-landing terms could be earned
+  after only 340 degrees.  Those models were not promoted.
+- v39 corrected every final landing reward and strict evaluator predicate to
+  require a true `2*pi` airborne revolution.  The permissive 320-degree latch
+  remains only a phase marker.  A regression test holds the robot at 350
+  degrees and proves it can never succeed; a fresh 360-degree landing must
+  continuously satisfy all predicates for 25 control steps (0.50 s).  Model
+  460 is the strongest complete apex-to-mat actor: 64/64 true revolutions,
+  64/64 feet-first latches, 55/64 ever below 2 rad/s, and a 0.20 s maximum
+  strict hold.  This is a curriculum milestone, not a complete cube takeoff.
+- v40 captured 251 exact model-460 full-revolution foot-contact states.  Reset
+  now restores `qpos`, `qvel`, the previous action observation, landing latches,
+  and a local specialist phase.  This isolates post-impact stabilization
+  without fabricating ballistic states.
+- The exact-touchdown run
+  `logs/rsl_rl/microduck_backflip_reference/2026-08-29_20-41-06_exact-mat-landing-rsi-v1-256`
+  trained model 460 through 559.  Strict 64-world seed-42 results were:
+
+  | checkpoint | max strict hold | success rate |
+  |---:|---:|---:|
+  | 480 | 0.22 s | 0/64 |
+  | 490 | 0.20 s | 0/64 |
+  | 500 | 0.42 s | 0/64 |
+  | 510 | 0.34 s | 0/64 |
+  | 520 | 0.36 s | 0/64 |
+  | **530** | **0.86 s** | **2/64** |
+  | 540 | 0.66 s | 2/64 |
+  | 550 | 0.54 s | 1/64 |
+  | 559 | 0.42 s | 0/64 |
+
+  Model 530 therefore solves favorable captured touchdown states, but not the
+  complete maneuver.  When switched into the live model-460 trajectory at
+  contact, its best hold was 0.36 s and success remained 0/64.  Switching it
+  during approach reduced the best hold to 0.32 s.  Model 540 and 550 live
+  hand-offs reached only 0.28 s and 0.22 s.  This rejects a policy-swap-only
+  solution: approach and recovery must be optimized in one actor.
+- v43 adds `Mjlab-BackflipReferenceMatMixed-Pedestal-MicroDuck`.  Each reset
+  independently samples 50% real 180-degree apex states and 50% exact
+  touchdown states, preserving global phase for flight and using local phase
+  plus restored action history for recovery.  All approach rewards remain
+  active, while strict stability/success weights are increased.  Focused
+  validation is 44 passed and a 64-world smoke evaluation is finite.  The
+  active unified run is
+  `logs/rsl_rl/microduck_backflip_reference/2026-08-29_21-00-03_unified-apex-landing-mix-v1-256`.
+- The unified run completed through model 559. In 64-world seed-42 threaded
+  screening, model 510 was the near-best at 0.46 s; later models regressed.
+  A 256-world threaded repeat contained one 0.54 s event, but the event moved
+  under replay because parallel floating-point reduction order perturbs
+  chaotic contact trajectories. The native launcher does use atomic-safe CPU
+  reductions, so this is not a lost-update bug, but threaded evaluation is not
+  deterministic enough for video selection.
+- v44 therefore fixes acceptance to `WARP_NUM_THREADS=1`. Across eight
+  deterministic 64-world batteries (seeds 40-47), model 510 produced one
+  strict success at seed 40 and two at seed 45. Seed 45 environment 14 is the
+  reproducible best: 369.487 degrees, first contact on a foot, 2.02 s
+  continuously within the strict feet/upright/height/<2 rad/s envelope. A
+  second seed-45 world held 0.72 s. Thus the apex-to-compliant-mat curriculum
+  has its first reproducible strict success, at 2/64 for that seed; robustness
+  remains low and the missing cube takeoff still prevents a complete maneuver
+  claim.
+
+Capture and exact-touchdown commands:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/python scripts/eval_backflip.py \
+  logs/rsl_rl/microduck_backflip_pedestal_braking/2026-08-29_19-12-36_integrated-late-braking-v1-256/model_225.pt \
+  --task-id Mjlab-BackflipBrake-Pedestal-MicroDuck \
+  --num-envs 256 --seed 42 --start-mode standing --assist-scale 1 \
+  --snapshot-angle-deg 180 \
+  --snapshot-output src/mjlab_microduck/tasks/data/pedestal_model225_angle180_seed42.json
+
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-BackflipReferenceMatLanding-Pedestal-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.experiment-name microduck_backflip_reference \
+  --agent.max-iterations 100 --agent.save-interval 10 \
+  --agent.run-name exact-mat-landing-rsi-v1-256 --agent.resume True \
+  --agent.load-run 2026-08-29_20-25-41_compliant-mat-strict360-v2-256 \
+  --agent.load-checkpoint model_460.pt
+```
+
+The current v39 visual evidence is
+`results/videos/v39-mat-model460-best-env14/backflip-model_460-task-step-0.mp4`
+(H.264, 1280x720, 50 fps, 4.0 s).  It begins in the captured airborne slice,
+completes the revolution, contacts feet first, and then falls.  It is not a
+stable landing, a cube-takeoff video, or physical-hardware evidence.
+
+The promoted v44 curriculum video is
+`results/videos/v44-unified-model510-strict-seed45-env14-warp1/backflip-model_510-task-step-0.mp4`.
+Its 64-world evaluation and exact per-step trace are stored alongside the v44
+results. The 1280x720, 50 fps, 4.0 s H.264 replay was rerun with one Warp
+thread and reproduced the same 2.02 s strict hold. It begins at the captured
+180-degree apex state, so it proves apex-to-mat continuation only.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

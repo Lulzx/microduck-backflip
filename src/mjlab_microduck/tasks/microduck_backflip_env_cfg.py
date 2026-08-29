@@ -24,7 +24,9 @@ from mjlab.terrains.terrain_generator import TerrainGeneratorCfg
 
 from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
+    BackflipMatTerrainCfg,
     BackflipPedestalTerrainCfg,
+    LANDING_MAT_HEIGHT,
     PEDESTAL_HEIGHT,
     PEDESTAL_WIDTH,
 )
@@ -41,6 +43,12 @@ STAND_Z = 0.115
 EPISODE_LENGTH_S = 4.0
 REFERENCE_STATE_PATH = (
     Path(__file__).parent / "data" / "pedestal_model225_angle260_seed42.json"
+)
+EARLY_REFERENCE_STATE_PATH = (
+    Path(__file__).parent / "data" / "pedestal_model225_angle180_seed42.json"
+)
+MAT_LANDING_REFERENCE_STATE_PATH = (
+    Path(__file__).parent / "data" / "mat_model460_landing_seed42.json"
 )
 
 _LEG_JOINTS = [0, 1, 2, 3, 4, 9, 10, 11, 12, 13]
@@ -791,14 +799,17 @@ def make_microduck_backflip_pedestal_braking_env_cfg(play: bool = False):
     return cfg
 
 
-def make_microduck_backflip_reference_env_cfg(play: bool = False):
+def make_microduck_backflip_reference_env_cfg(
+    play: bool = False,
+    reference_state_path: Path = REFERENCE_STATE_PATH,
+):
     """Iterative-reference continuation from states the cube actor produced."""
     cfg = make_microduck_backflip_pedestal_braking_env_cfg(play=play)
     cfg.events["set_backflip_state"] = EventTermCfg(
         func=microduck_mdp.reset_backflip_reference_state,
         mode="reset",
         params={
-            "reference_state_path": str(REFERENCE_STATE_PATH),
+            "reference_state_path": str(reference_state_path),
             "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
         },
     )
@@ -812,6 +823,144 @@ def make_microduck_backflip_reference_env_cfg(play: bool = False):
     )
     cfg.rewards["backflip_stability_progress"].weight = 400.0
     cfg.rewards["backflip_success"].weight = 400.0
+    return cfg
+
+
+def make_microduck_backflip_early_reference_env_cfg(play: bool = False):
+    """Continue the real cube launch from its apex instead of final approach.
+
+    The 260-degree reference slice left about 0.15 seconds to dissipate impact
+    energy.  The 180-degree slice is near the ballistic apex and roughly
+    doubles that control window.  A timing cost asks the actor to retain only
+    the pitch rate required to reach upright at predicted foot-height contact;
+    this preserves the revolution objective while teaching earlier untucking.
+    """
+    cfg = make_microduck_backflip_reference_env_cfg(
+        play=play,
+        reference_state_path=EARLY_REFERENCE_STATE_PATH,
+    )
+    cfg.rewards["backflip_flight_tuck"].params.update(
+        {
+            "gate_hi": math.radians(210.0),
+            "fade_out": math.radians(250.0),
+        }
+    )
+    cfg.rewards["backflip_prepare_landing"].params.update(
+        {
+            "gate_lo": math.radians(190.0),
+            "gate_hi": math.radians(280.0),
+        }
+    )
+    cfg.rewards["backflip_landing_approach"].params.update(
+        {
+            "gate_lo": math.radians(220.0),
+            "gate_hi": math.radians(310.0),
+        }
+    )
+    cfg.rewards["backflip_late_pitch_rate"].weight = -20.0
+    cfg.rewards["backflip_rotation_timing"] = RewardTermCfg(
+        func=microduck_mdp.backflip_rotation_timing_cost,
+        weight=-100.0,
+        params={
+            "target_angle": 2 * math.pi,
+            "target_height": STAND_Z,
+            "gate_lo": math.radians(170.0),
+            "gate_hi": math.radians(220.0),
+            "rate_error_scale": 8.0,
+        },
+    )
+    return cfg
+
+
+def make_microduck_backflip_mat_reference_env_cfg(play: bool = False):
+    """Apex continuation onto a raised compliant landing mat."""
+    cfg = make_microduck_backflip_early_reference_env_cfg(play=play)
+    # Before the reset event loads an airborne reference, MuJoCo briefly sees
+    # the default low standing pose intersecting the raised mat.  Reserve the
+    # same contact capacity used by the repository's rough-terrain tasks.
+    cfg.sim.nconmax = 200
+    cfg.scene.terrain = TerrainEntityCfg(
+        terrain_type="generator",
+        terrain_generator=TerrainGeneratorCfg(
+            seed=42,
+            size=(2.0, 2.0),
+            curriculum=False,
+            num_rows=1,
+            num_cols=1,
+            color_scheme="none",
+            sub_terrains={"backflip_mat": BackflipMatTerrainCfg()},
+        ),
+        max_init_terrain_level=0,
+    )
+    target_height = LANDING_MAT_HEIGHT + STAND_Z
+    cfg.rewards["backflip_landing_approach"].params["target_height"] = target_height
+    cfg.rewards["backflip_landing"].params["target_height"] = target_height
+    cfg.rewards["backflip_landing_height"].params.update(
+        {
+            "target_height": target_height,
+            "minimum_height": LANDING_MAT_HEIGHT + 0.06,
+        }
+    )
+    cfg.rewards["backflip_rotation_timing"].params["target_height"] = target_height
+    # Feet touch while the root is still above its nominal standing height.
+    # Aim modestly past one revolution in the ballistic predictor so contact
+    # occurs after the strict 360-degree airborne gate rather than at 340-ish.
+    cfg.rewards["backflip_rotation_timing"].params["target_angle"] = math.radians(
+        385.0
+    )
+    return cfg
+
+
+def make_microduck_backflip_mat_landing_reference_env_cfg(play: bool = False):
+    """Post-impact RSI from exact full-revolution model-460 mat contacts."""
+    cfg = make_microduck_backflip_mat_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_landing_reference_state,
+        mode="reset",
+        params={
+            "reference_state_path": str(MAT_LANDING_REFERENCE_STATE_PATH),
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+        },
+    )
+    # These episodes begin after the flight frontier has been frozen. Retain
+    # only post-impact objectives so the critic spends its capacity on the
+    # 0.5-second balance problem rather than constant zero flight terms.
+    for name in (
+        "backflip_takeoff",
+        "backflip_launch_velocity",
+        "backflip_preload",
+        "backflip_launch_quality",
+        "backflip_supported_push",
+        "backflip_feasible_push",
+        "backflip_rotation",
+        "backflip_flight_tuck",
+        "backflip_prepare_landing",
+        "backflip_landing_approach",
+        "backflip_late_pitch_rate",
+        "backflip_rotation_timing",
+        "backflip_rotation_overshoot",
+    ):
+        cfg.rewards[name].weight = 0.0
+    return cfg
+
+
+def make_microduck_backflip_mat_mixed_reference_env_cfg(play: bool = False):
+    """Unified apex-to-landing curriculum with exact touchdown rehearsal."""
+    cfg = make_microduck_backflip_mat_reference_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_mixed_reference_state,
+        mode="reset",
+        params={
+            "flight_reference_state_path": str(EARLY_REFERENCE_STATE_PATH),
+            "landing_reference_state_path": str(MAT_LANDING_REFERENCE_STATE_PATH),
+            "landing_probability": 0.5,
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+        },
+    )
+    # Give the sparse exact-hold event enough leverage to survive PPO updates
+    # from the much longer flight slice while preserving all approach terms.
+    cfg.rewards["backflip_stability_progress"].weight = 600.0
+    cfg.rewards["backflip_success"].weight = 800.0
     return cfg
 
 
@@ -849,3 +998,35 @@ MicroduckBackflipReferenceRlCfg.experiment_name = "microduck_backflip_reference"
 MicroduckBackflipReferenceRlCfg.run_name = "microduck_backflip_reference"
 MicroduckBackflipReferenceRlCfg.algorithm.learning_rate = 3.0e-4
 MicroduckBackflipReferenceRlCfg.algorithm.entropy_coef = 0.002
+
+MicroduckBackflipEarlyReferenceRlCfg = deepcopy(MicroduckBackflipReferenceRlCfg)
+MicroduckBackflipEarlyReferenceRlCfg.experiment_name = (
+    "microduck_backflip_reference_early"
+)
+MicroduckBackflipEarlyReferenceRlCfg.run_name = "microduck_backflip_reference_early"
+
+MicroduckBackflipMatReferenceRlCfg = deepcopy(MicroduckBackflipEarlyReferenceRlCfg)
+MicroduckBackflipMatReferenceRlCfg.experiment_name = (
+    "microduck_backflip_reference_mat"
+)
+MicroduckBackflipMatReferenceRlCfg.run_name = "microduck_backflip_reference_mat"
+
+MicroduckBackflipMatLandingReferenceRlCfg = deepcopy(
+    MicroduckBackflipMatReferenceRlCfg
+)
+MicroduckBackflipMatLandingReferenceRlCfg.experiment_name = (
+    "microduck_backflip_reference_mat_landing"
+)
+MicroduckBackflipMatLandingReferenceRlCfg.run_name = (
+    "microduck_backflip_reference_mat_landing"
+)
+
+MicroduckBackflipMatMixedReferenceRlCfg = deepcopy(
+    MicroduckBackflipMatReferenceRlCfg
+)
+MicroduckBackflipMatMixedReferenceRlCfg.experiment_name = (
+    "microduck_backflip_reference_mat_mixed"
+)
+MicroduckBackflipMatMixedReferenceRlCfg.run_name = (
+    "microduck_backflip_reference_mat_mixed"
+)

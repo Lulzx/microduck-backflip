@@ -74,12 +74,20 @@ from .microduck_backflip_env_cfg import (
     make_microduck_backflip_pedestal_env_cfg,
     make_microduck_backflip_pedestal_braking_env_cfg,
     make_microduck_backflip_reference_env_cfg,
+    make_microduck_backflip_early_reference_env_cfg,
+    make_microduck_backflip_mat_reference_env_cfg,
+    make_microduck_backflip_mat_landing_reference_env_cfg,
+    make_microduck_backflip_mat_mixed_reference_env_cfg,
     MicroduckBackflipRlCfg,
     MicroduckBackflipRecoveryRlCfg,
     MicroduckBackflipTouchdownRlCfg,
     MicroduckBackflipPedestalRlCfg,
     MicroduckBackflipPedestalBrakingRlCfg,
     MicroduckBackflipReferenceRlCfg,
+    MicroduckBackflipEarlyReferenceRlCfg,
+    MicroduckBackflipMatReferenceRlCfg,
+    MicroduckBackflipMatLandingReferenceRlCfg,
+    MicroduckBackflipMatMixedReferenceRlCfg,
 )
 from .backlash import make_backlash_variant
 
@@ -134,6 +142,42 @@ register_mjlab_task(
     env_cfg=make_microduck_backflip_reference_env_cfg(),
     play_env_cfg=make_microduck_backflip_reference_env_cfg(play=True),
     rl_cfg=MicroduckBackflipReferenceRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Earlier iterative-reference slice — apex-to-contact angular timing control.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceEarly-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_early_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_early_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipEarlyReferenceRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Easier impact curriculum — same apex states, raised compliant landing mat.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceMat-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_mat_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_mat_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatReferenceRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Exact post-impact RSI from full-revolution model-460 mat contacts.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceMatLanding-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_mat_landing_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_mat_landing_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatLandingReferenceRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# One actor rehearses both the real apex continuation and exact mat touchdown.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReferenceMatMixed-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_mat_mixed_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_mat_mixed_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipMatMixedReferenceRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 
