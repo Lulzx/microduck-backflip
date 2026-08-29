@@ -8543,6 +8543,26 @@ def backflip_body_only_contact(
     return env._backflip_landed_latch & robot & ~feet
 
 
+def backflip_postflight_body_only_contact(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Terminate a touchdown-specialist trial on body-first recontact.
+
+    Unlike the post-contact recovery slice, the late-flight task may never
+    latch a valid landing. Once its first recontact has ended the flight and a
+    non-foot body is on the floor without foot support, no strict landing can
+    be recovered in that episode.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    _update_backflip_state(env, asset)
+    feet = _sensor_any_contact(env, _BACKFLIP_FEET_SENSOR)
+    robot = _sensor_any_contact(env, _BACKFLIP_ROBOT_SENSOR)
+    if feet is None or robot is None:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    return env._backflip_flight_ended_latch & robot & ~feet
+
+
 def backflip_assisted_action_cost(env: ManagerBasedRlEnv) -> torch.Tensor:
     """Keep the validated nominal-PD pose while the virtual spotter is strong.
 
@@ -8591,6 +8611,19 @@ def backflip_late_pitch_rate_cost(
     active = (env._backflip_airborne_latch & ~env._backflip_flight_ended_latch).float()
     gate = _backflip_progress_gate(env, gate_lo, gate_hi)
     return (omega_back / max(rate_scale, 1e-6)).square() * gate * active
+
+
+def backflip_rotation_overshoot_cost(
+    env: ManagerBasedRlEnv,
+    target_angle: float = 2 * math.pi,
+    angle_scale: float = math.radians(45.0),
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Penalize rotation beyond one revolution in touchdown specialists."""
+    asset: Entity = env.scene[asset_cfg.name]
+    _update_backflip_state(env, asset)
+    overshoot = torch.clamp(env._backflip_max - target_angle, min=0.0)
+    return (overshoot / max(angle_scale, 1e-6)).square()
 
 
 def backflip_wrong_direction_cost(

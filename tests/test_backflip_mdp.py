@@ -1,5 +1,6 @@
 """State-machine regression tests for what physically counts as a backflip."""
 
+import math
 from types import SimpleNamespace
 
 import torch
@@ -152,6 +153,21 @@ def test_pedestal_contact_does_not_count_until_robot_clears_launch_cube():
     env2.common_step_counter = 1
     mdp._update_backflip_state(env2, asset2)
     assert env2._backflip_landed_latch.item() is True
+
+
+def test_touchdown_overshoot_cost_and_body_first_termination():
+    env, asset = _fake_env()
+    mdp._backflip_state(env)
+    env._backflip_max[:] = torch.deg2rad(torch.tensor([405.0]))
+    cost = mdp.backflip_rotation_overshoot_cost(
+        env, angle_scale=math.radians(45.0)
+    )
+    assert torch.isclose(cost, torch.ones_like(cost)).all()
+
+    env._backflip_flight_ended_latch[:] = True
+    _contacts(env, feet=False, robot=True)
+    env.common_step_counter = 1
+    assert mdp.backflip_postflight_body_only_contact(env).item() is True
 
 
 def test_success_requires_continuous_half_second_stable_hold():

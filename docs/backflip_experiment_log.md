@@ -450,6 +450,45 @@ WARP_NUM_THREADS=12 .venv/bin/microduck-train \
 Run directory:
 `logs/rsl_rl/microduck_backflip_touchdown/2026-08-29_18-35-12_late-flight-v1-pedestal200-warmstart-256`.
 
+**2026-08-29 18:39-18:45 IST — v29 braking objective correction.**
+
+- Models 225 and 250 each produced only 1/64 landing latches and 0 strict
+  holds on late-flight starts. Mean final rotation changed from 398.81 to
+  397.63 degrees, far too slowly.
+- Training telemetry showed late-pitch cost near -0.1 episode return while the
+  policy could retain long positive survival return after an invalid impact.
+  Rotation beyond 360 degrees had no direct cost, and the inherited
+  body-contact termination required a valid landing latch before firing.
+- Touchdown-only corrections: late-pitch weight -120 with a 300–350 degree
+  gate; one-revolution overshoot cost weight -100 with 45 degree scale;
+  landing-preparation and approach weights 100; body-contact weight -20; and
+  immediate termination after flight-ending body-only contact whether or not a
+  valid landing latched. Full-task and standing-evaluation rewards are
+  unchanged.
+- Regression tests cover the overshoot scale and post-flight termination. The
+  updated 16-world smoke test had nonzero overshoot return (-1.4341), zero NaN
+  termination, and completed normally.
+- Resumed touchdown model 250 under the corrected MDP. Initial telemetry now
+  exposes meaningful costs: late pitch -3.35, overshoot -5.40, mean episode
+  length 9.35 steps, and mean reward -11.22. This proves failures are no longer
+  rewarded by lying on the floor; it does not prove learning.
+
+Resume command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-BackflipTouchdown-Flat-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 250 --agent.save-interval 25 \
+  --agent.run-name late-flight-v2-braking-256 \
+  --agent.logger tensorboard --agent.resume True \
+  --agent.load-run 2026-08-29_18-35-12_late-flight-v1-pedestal200-warmstart-256 \
+  --agent.load-checkpoint model_250.pt
+```
+
+Run directory:
+`logs/rsl_rl/microduck_backflip_touchdown/2026-08-29_18-44-16_late-flight-v2-braking-256`.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

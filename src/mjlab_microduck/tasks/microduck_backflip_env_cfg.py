@@ -539,6 +539,26 @@ def make_microduck_backflip_touchdown_env_cfg(play: bool = False):
         }
     )
     cfg.curriculum.pop("backflip_spawn_mix", None)
+    cfg.curriculum.pop("body_contact_weight", None)
+    cfg.rewards["backflip_late_pitch_rate"].weight = -120.0
+    cfg.rewards["backflip_late_pitch_rate"].params.update(
+        {
+            "gate_lo": math.radians(300.0),
+            "gate_hi": math.radians(350.0),
+            "rate_scale": 15.0,
+        }
+    )
+    cfg.rewards["backflip_prepare_landing"].weight = 100.0
+    cfg.rewards["backflip_landing_approach"].weight = 100.0
+    cfg.rewards["backflip_body_contact"].weight = -20.0
+    cfg.rewards["backflip_rotation_overshoot"] = RewardTermCfg(
+        func=microduck_mdp.backflip_rotation_overshoot_cost,
+        weight=-100.0,
+        params={
+            "target_angle": 2 * math.pi,
+            "angle_scale": math.radians(45.0),
+        },
+    )
     cfg.curriculum["backflip_touchdown_difficulty"] = CurriculumTermCfg(
         func=microduck_mdp.event_param_curriculum,
         params={
@@ -590,7 +610,7 @@ def make_microduck_backflip_touchdown_env_cfg(play: bool = False):
         },
     )
     cfg.terminations["backflip_body_only_contact"] = TerminationTermCfg(
-        func=microduck_mdp.backflip_body_only_contact,
+        func=microduck_mdp.backflip_postflight_body_only_contact,
         time_out=False,
     )
     return cfg

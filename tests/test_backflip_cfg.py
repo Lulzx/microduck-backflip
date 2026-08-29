@@ -160,6 +160,13 @@ def test_touchdown_specialist_starts_airborne_and_expands_approach_distribution(
     assert reset["midflight_ballistic_landing"] is True
     assert reset["initial_assist_scale"] == 0.0
     assert "backflip_body_only_contact" in cfg.terminations
+    assert (
+        cfg.terminations["backflip_body_only_contact"].func
+        is microduck_mdp.backflip_postflight_body_only_contact
+    )
+    assert cfg.rewards["backflip_late_pitch_rate"].weight <= -100.0
+    assert cfg.rewards["backflip_rotation_overshoot"].weight < 0.0
+    assert "body_contact_weight" not in cfg.curriculum
     stages = cfg.curriculum["backflip_touchdown_difficulty"].params["param_stages"]
     assert stages[0]["params"]["midflight_angle_range"][0] > stages[-1][
         "params"
