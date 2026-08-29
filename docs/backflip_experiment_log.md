@@ -376,6 +376,44 @@ Run directory:
   and
   `results/videos/v28-pedestal-hierarchical-launch200-recovery100-env31/backflip-model_200-standing-step-0.mp4`.
 
+**2026-08-29 18:17-18:24 IST — measured impact gap and high-spin restart.**
+
+- Recovery model 150 on the explicit medium profile achieved **63/64 (98.4%)**
+  strict holds under downward speeds through -1.25 m/s, tilts through 15
+  degrees, and angular speeds through 3 rad/s. Median strict hold was 1.58 s.
+- Composing model 150 behind pedestal launch model 200 still produced 0/64
+  full strict holds, both with contact-triggered and final-approach switching.
+- A selected-world trace of environment 31 measured the actual first contact:
+  359.93 degrees rotation, 15.06 degrees tilt, -1.67 m/s vertical speed, and
+  **17.58 rad/s angular speed**. The recovery actor's first action arrived on
+  the following 20 ms control step. The previous medium maximum of 3 rad/s,
+  and even the planned 10 rad/s final stage, did not cover this state.
+- Evaluator recovery profiles now make checkpoint difficulty explicit instead
+  of silently evaluating every checkpoint on the easy reset distribution.
+  Selected-world tracing follows `--render-env-index` rather than always world
+  zero. An optional `approach` switch activates at >=330 degrees, <=40 degrees
+  tilt, <=0.36 m height while descending; it did not solve the distribution
+  gap by itself.
+- The original v28 run was stopped at model 200. Its checkpoint was resumed
+  with hard/extreme angular-speed limits raised to 12/20 rad/s, bracketing the
+  measured touchdown.
+
+High-spin resume command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-BackflipRecovery-Flat-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 250 --agent.save-interval 50 \
+  --agent.run-name impact-recovery-v2-high-spin-256 \
+  --agent.logger tensorboard --agent.resume True \
+  --agent.load-run 2026-08-29_18-07-19_impact-recovery-v1-model50-warmstart-256 \
+  --agent.load-checkpoint model_200.pt
+```
+
+Run directory:
+`logs/rsl_rl/microduck_backflip_recovery/2026-08-29_18-23-32_impact-recovery-v2-high-spin-256`.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

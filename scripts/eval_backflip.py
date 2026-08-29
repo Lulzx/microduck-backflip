@@ -83,6 +83,8 @@ def evaluate(
     assist_end_s: float | None = None,
     task_id: str = TASK_ID,
     recovery_checkpoint: Path | None = None,
+    recovery_profile: str | None = None,
+    recovery_switch_mode: str = "landing",
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -122,6 +124,44 @@ def evaluate(
         reset["recovery_prob"] = 1.0
     elif start_mode != "standing":
         raise ValueError(f"Unsupported start mode: {start_mode}")
+    if recovery_profile is not None:
+        if start_mode != "recovery":
+            raise ValueError("recovery_profile requires --start-mode recovery")
+        profiles = {
+            "easy": {
+                "recovery_z_range": (0.112, 0.118),
+                "recovery_tilt_max": math.radians(5.0),
+                "recovery_lin_vel_max": 0.08,
+                "recovery_ang_vel_max": 0.75,
+                "recovery_vertical_velocity_range": (-0.40, -0.05),
+                "joint_noise_std": 0.01,
+            },
+            "medium": {
+                "recovery_z_range": (0.108, 0.12),
+                "recovery_tilt_max": math.radians(15.0),
+                "recovery_lin_vel_max": 0.30,
+                "recovery_ang_vel_max": 3.0,
+                "recovery_vertical_velocity_range": (-1.25, -0.10),
+                "joint_noise_std": 0.03,
+            },
+            "hard": {
+                "recovery_z_range": (0.105, 0.125),
+                "recovery_tilt_max": math.radians(30.0),
+                "recovery_lin_vel_max": 0.75,
+                "recovery_ang_vel_max": 12.0,
+                "recovery_vertical_velocity_range": (-2.50, -0.20),
+                "joint_noise_std": 0.08,
+            },
+            "extreme": {
+                "recovery_z_range": (0.100, 0.13),
+                "recovery_tilt_max": math.radians(45.0),
+                "recovery_lin_vel_max": 1.20,
+                "recovery_ang_vel_max": 20.0,
+                "recovery_vertical_velocity_range": (-3.25, -0.25),
+                "joint_noise_std": 0.10,
+            },
+        }
+        env_cfg.events["set_backflip_state"].params.update(profiles[recovery_profile])
 
     if video_dir is not None:
         env_cfg.viewer.width = 1280
@@ -210,6 +250,7 @@ def evaluate(
     landing_time = torch.full_like(takeoff_time, float("nan"))
     stable_time = torch.full_like(takeoff_time, float("nan"))
     trace_steps: list[dict] = []
+    trace_idx = render_env_index
 
     with torch.inference_mode():
         for step in range(base_env.max_episode_length):
@@ -227,6 +268,24 @@ def evaluate(
             # only after the state machine validates a rotated, upright,
             # feet-first contact clear of the launch surface.
             recovery_active |= landed_now
+            if recovery_policy is not None and recovery_switch_mode == "approach":
+                robot_state = base_env.scene["robot"].data
+                quat_now = robot_state.root_link_quat_w
+                upright_now = 1.0 - 2.0 * (
+                    quat_now[:, 1].square() + quat_now[:, 2].square()
+                )
+                relative_z = (
+                    robot_state.root_link_pos_w[:, 2]
+                    - base_env.scene.terrain.env_origins[:, 2]
+                )
+                recovery_active |= (
+                    launched_now
+                    & ~base_env._backflip_flight_ended_latch
+                    & (base_env._backflip_max >= math.radians(330.0))
+                    & (upright_now >= math.cos(math.radians(40.0)))
+                    & (relative_z <= 0.36)
+                    & (robot_state.root_link_lin_vel_w[:, 2] < 0.0)
+                )
             first_takeoff = launched_now & ~launched
             first_300 = (base_env._backflip_max >= math.radians(300.0)) & ~rotated_300
             first_landing = landed_now & ~landed
@@ -360,52 +419,59 @@ def evaluate(
                 & torch.isfinite(sim_data.qvel).all(dim=-1)
             )
             if trace_output is not None:
-                # Environment zero is deterministic for a fixed checkpoint and
-                # seed.  Keep the raw 14-D policy action so launch mechanics can
-                # be inspected without changing the actor observation contract.
+                # Keep the raw 14-D action for the selected deterministic world
+                # so launch/contact mechanics can be inspected without changing
+                # the actor observation contract.
                 trace_steps.append(
                     {
                         "time_s": now,
-                        "root_height_m": float(height[0].item()),
-                        "upward_velocity_m_s": float(upward_velocity[0].item()),
-                        "backward_pitch_rate_rad_s": float(pitch_rate_back[0].item()),
+                        "root_height_m": float(height[trace_idx].item()),
+                        "upward_velocity_m_s": float(upward_velocity[trace_idx].item()),
+                        "backward_pitch_rate_rad_s": float(pitch_rate_back[trace_idx].item()),
                         "body_roll_rate_rad_s": float(
-                            robot.root_link_ang_vel_b[0, 0].item()
+                            robot.root_link_ang_vel_b[trace_idx, 0].item()
                         ),
                         "axial_yaw_rate_rad_s": float(
-                            robot.root_link_ang_vel_b[0, 2].item()
+                            robot.root_link_ang_vel_b[trace_idx, 2].item()
                         ),
                         "lateral_axis_tilt_deg": float(
                             torch.rad2deg(
                                 torch.asin(
-                                    torch.clamp(lateral_axis_z[0].abs(), 0.0, 1.0)
+                                    torch.clamp(
+                                        lateral_axis_z[trace_idx].abs(), 0.0, 1.0
+                                    )
                                 )
                             ).item()
                         ),
                         "airborne_rotation_deg": float(
-                            torch.rad2deg(base_env._backflip_accum[0]).item()
+                            torch.rad2deg(base_env._backflip_accum[trace_idx]).item()
                         ),
                         "upright_tilt_deg": float(
                             torch.rad2deg(
-                                torch.acos(torch.clamp(upright[0], -1.0, 1.0))
+                                torch.acos(
+                                    torch.clamp(upright[trace_idx], -1.0, 1.0)
+                                )
                             ).item()
                         ),
-                        "angular_speed_rad_s": float(angular_speed[0].item()),
-                        "feet_contact": bool(feet_now[0].item()),
-                        "robot_contact": bool(robot_contact_now[0].item()),
-                        "landing_eligible": bool(landing_eligible[0].item()),
-                        "upright_ok": bool(upright_ok[0].item()),
-                        "height_ok": bool(height_ok[0].item()),
-                        "low_angular_speed": bool(low_angular_speed[0].item()),
-                        "posture_ok": bool(posture_now[0].item()),
-                        "stable_now": bool(stable_now[0].item()),
-                        "stable_steps": int(stable_steps[0].item()),
-                        "airborne_latched": bool(launched_now[0].item()),
+                        "angular_speed_rad_s": float(angular_speed[trace_idx].item()),
+                        "feet_contact": bool(feet_now[trace_idx].item()),
+                        "robot_contact": bool(robot_contact_now[trace_idx].item()),
+                        "landing_eligible": bool(landing_eligible[trace_idx].item()),
+                        "upright_ok": bool(upright_ok[trace_idx].item()),
+                        "height_ok": bool(height_ok[trace_idx].item()),
+                        "low_angular_speed": bool(low_angular_speed[trace_idx].item()),
+                        "posture_ok": bool(posture_now[trace_idx].item()),
+                        "stable_now": bool(stable_now[trace_idx].item()),
+                        "stable_steps": int(stable_steps[trace_idx].item()),
+                        "airborne_latched": bool(launched_now[trace_idx].item()),
                         "flight_ended_latched": bool(
-                            base_env._backflip_flight_ended_latch[0].item()
+                            base_env._backflip_flight_ended_latch[trace_idx].item()
                         ),
-                        "landed_latched": bool(landed_now[0].item()),
-                        "action": [float(x) for x in actions[0].tolist()],
+                        "landed_latched": bool(landed_now[trace_idx].item()),
+                        "recovery_policy_active": bool(
+                            recovery_active[trace_idx].item()
+                        ),
+                        "action": [float(x) for x in actions[trace_idx].tolist()],
                     }
                 )
 
@@ -457,6 +523,8 @@ def evaluate(
         "seed": seed,
         "episodes": num_envs,
         "start_mode": start_mode,
+        "recovery_profile": recovery_profile,
+        "recovery_switch_mode": recovery_switch_mode,
         "standing_start_only": start_mode == "standing",
         "assist_scale": assist_scale,
         "assist_wrench": {
@@ -552,7 +620,7 @@ def evaluate(
             "checkpoint": str(checkpoint.resolve()),
             "seed": seed,
             "start_mode": start_mode,
-            "environment_index": 0,
+            "environment_index": trace_idx,
             "step_dt_s": base_env.step_dt,
             "steps": trace_steps,
         }
@@ -597,6 +665,17 @@ def main() -> None:
         help="Optional second actor activated after a valid feet-first landing latch",
     )
     parser.add_argument(
+        "--recovery-profile",
+        choices=("easy", "medium", "hard", "extreme"),
+        help="Explicit touchdown disturbance profile for recovery-only evaluation",
+    )
+    parser.add_argument(
+        "--recovery-switch-mode",
+        choices=("landing", "approach"),
+        default="landing",
+        help="Activate the specialist at validated contact or during final approach",
+    )
+    parser.add_argument(
         "--trace-output",
         type=Path,
         help="Write per-step kinematics and policy actions for environment zero",
@@ -618,6 +697,8 @@ def main() -> None:
         args.assist_end_s,
         args.task_id,
         args.recovery_checkpoint,
+        args.recovery_profile,
+        args.recovery_switch_mode,
     )
 
 
