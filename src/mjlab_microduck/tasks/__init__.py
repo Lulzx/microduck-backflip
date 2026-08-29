@@ -72,10 +72,12 @@ from .microduck_backflip_env_cfg import (
     make_microduck_backflip_recovery_env_cfg,
     make_microduck_backflip_touchdown_env_cfg,
     make_microduck_backflip_pedestal_env_cfg,
+    make_microduck_backflip_pedestal_braking_env_cfg,
     MicroduckBackflipRlCfg,
     MicroduckBackflipRecoveryRlCfg,
     MicroduckBackflipTouchdownRlCfg,
     MicroduckBackflipPedestalRlCfg,
+    MicroduckBackflipPedestalBrakingRlCfg,
 )
 from .backlash import make_backlash_variant
 
@@ -112,6 +114,15 @@ register_mjlab_task(
     env_cfg=make_microduck_backflip_pedestal_env_cfg(),
     play_env_cfg=make_microduck_backflip_pedestal_env_cfg(play=True),
     rl_cfg=MicroduckBackflipPedestalRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Integrated cube fine-tune — assisted launch, autonomous late-flight braking.
+register_mjlab_task(
+    task_id="Mjlab-BackflipBrake-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_pedestal_braking_env_cfg(),
+    play_env_cfg=make_microduck_backflip_pedestal_braking_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipPedestalBrakingRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

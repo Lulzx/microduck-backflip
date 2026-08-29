@@ -697,6 +697,96 @@ def make_microduck_backflip_pedestal_env_cfg(play: bool = False):
     return cfg
 
 
+def make_microduck_backflip_pedestal_braking_env_cfg(play: bool = False):
+    """Fine-tune launch and touchdown together on the real cube trajectory.
+
+    The assisted teacher remains protected through the mechanically difficult
+    launch and tuck. After 280 degrees the same actor receives full authority,
+    so landing gradients can change leg extension before impact rather than
+    trying to recover from an already committed high-spin contact. Most worlds
+    start on the cube; a shrinking late-flight slice keeps the landing basin
+    populated while the integrated skill adapts.
+    """
+    cfg = make_microduck_backflip_pedestal_env_cfg(play=play)
+    action = cfg.actions["joint_pos"]
+    action.full_authority_after_angle_rad = math.radians(280.0)
+
+    reset = cfg.events["set_backflip_state"].params
+    reset.update(
+        {
+            "standing_prob": 0.75,
+            "crouch_prob": 0.0,
+            "midflight_prob": 0.25,
+            "recovery_prob": 0.0,
+            "midflight_angle_range": (
+                math.radians(280.0),
+                math.radians(350.0),
+            ),
+            "midflight_z_range": (0.20, 0.38),
+            "midflight_omega_range": (10.0, 22.0),
+            "midflight_ballistic_landing": True,
+            "midflight_landing_z": STAND_Z,
+            "midflight_time_margin_range": (0.01, 0.10),
+            "tuck_factor_range": (0.15, 1.0),
+        }
+    )
+    cfg.curriculum["backflip_spawn_mix"].params["param_stages"] = [
+        {
+            "step": 0,
+            "params": {
+                "standing_prob": 0.75,
+                "crouch_prob": 0.0,
+                "midflight_prob": 0.25,
+                "recovery_prob": 0.0,
+            },
+        },
+        {
+            "step": 100 * 24,
+            "params": {
+                "standing_prob": 0.90,
+                "crouch_prob": 0.0,
+                "midflight_prob": 0.10,
+                "recovery_prob": 0.0,
+            },
+        },
+        {
+            "step": 200 * 24,
+            "params": {
+                "standing_prob": 1.0,
+                "crouch_prob": 0.0,
+                "midflight_prob": 0.0,
+                "recovery_prob": 0.0,
+            },
+        },
+    ]
+
+    cfg.curriculum.pop("body_contact_weight", None)
+    cfg.rewards["backflip_late_pitch_rate"].weight = -120.0
+    cfg.rewards["backflip_late_pitch_rate"].params.update(
+        {
+            "gate_lo": math.radians(280.0),
+            "gate_hi": math.radians(350.0),
+            "rate_scale": 15.0,
+        }
+    )
+    cfg.rewards["backflip_prepare_landing"].weight = 100.0
+    cfg.rewards["backflip_landing_approach"].weight = 100.0
+    cfg.rewards["backflip_body_contact"].weight = -20.0
+    cfg.rewards["backflip_rotation_overshoot"] = RewardTermCfg(
+        func=microduck_mdp.backflip_rotation_overshoot_cost,
+        weight=-100.0,
+        params={
+            "target_angle": 2 * math.pi,
+            "angle_scale": math.radians(45.0),
+        },
+    )
+    cfg.terminations["backflip_body_only_contact"] = TerminationTermCfg(
+        func=microduck_mdp.backflip_postflight_body_only_contact,
+        time_out=False,
+    )
+    return cfg
+
+
 MicroduckBackflipRlCfg = deepcopy(MicroduckRouladeRlCfg)
 MicroduckBackflipRlCfg.experiment_name = "microduck_backflip"
 MicroduckBackflipRlCfg.run_name = "microduck_backflip"
@@ -717,3 +807,11 @@ MicroduckBackflipTouchdownRlCfg.run_name = "microduck_backflip_touchdown"
 MicroduckBackflipPedestalRlCfg = deepcopy(MicroduckBackflipRlCfg)
 MicroduckBackflipPedestalRlCfg.experiment_name = "microduck_backflip_pedestal"
 MicroduckBackflipPedestalRlCfg.run_name = "microduck_backflip_pedestal"
+
+MicroduckBackflipPedestalBrakingRlCfg = deepcopy(MicroduckBackflipRlCfg)
+MicroduckBackflipPedestalBrakingRlCfg.experiment_name = (
+    "microduck_backflip_pedestal_braking"
+)
+MicroduckBackflipPedestalBrakingRlCfg.run_name = (
+    "microduck_backflip_pedestal_braking"
+)

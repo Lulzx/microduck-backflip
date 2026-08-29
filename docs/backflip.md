@@ -56,6 +56,17 @@ expands from 330–350° at 12–18 rad/s to 280–355° at 10–22 rad/s. This 
 from a post-contact recovery reset, which cannot teach pre-impact foot
 placement and was shown not to transfer to the actual cube touchdown.
 
+`Mjlab-BackflipBrake-Pedestal-MicroDuck` is the integrated fine-tuning stage.
+It warm-starts the cube launch actor, protects the assisted nominal-PD teacher
+through 280°, then restores full action authority for extension, braking, and
+impact absorption. Its reset mix starts at 75% complete cube trajectories and
+25% late-flight lessons, becomes 100% cube starts by iteration 200, and uses
+the touchdown specialist's late-spin, overshoot, preparation, and body-impact
+objectives. This avoids both failure modes observed in policy composition:
+synthetic post-contact states omit the real leg geometry, while a separate
+late-flight actor cannot repair a launch trajectory if the assisted residual
+clamp still limits it to 5% authority.
+
 The current discovery task also uses an EFGCL-style virtual spotter: a 16 N
 upward force and 1.40 Nm backward-pitch torque from 0.30 to 0.40 seconds. Its
 scale drops only after a 60% strict landing rate over an evaluation window.
@@ -76,6 +87,9 @@ switches to 100% immediately after recontact for recovery, and linearly regains
 100% pre-contact authority as assistance reaches zero. Strict evaluation is
 therefore the ordinary full-authority policy, not a permanently constrained
 controller.
+The integrated pedestal-braking variant additionally releases full authority
+after 280°; the spotter pulse has already ended by then, so this changes only
+the actor's ability to brake and place its feet before impact.
 Unassisted reverse-curriculum worlds retain full authority regardless of the
 global stage. Assistance can decay only after the same continuous 0.5-second
 stable hold used by the evaluator; a one-frame feet touch is not curriculum

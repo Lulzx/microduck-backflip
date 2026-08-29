@@ -11,6 +11,7 @@ class BackflipResidualJointPositionActionCfg(JointPositionActionCfg):
     """Joint targets with residual authority coupled to spotter strength."""
 
     min_assisted_authority: float = 0.05
+    full_authority_after_angle_rad: float | None = None
 
     def build(self, env):
         return BackflipResidualJointPositionAction(self, env)
@@ -48,6 +49,16 @@ class BackflipResidualJointPositionAction(JointPositionAction):
                 # restore full authority on the control step after recontact so
                 # the actor can absorb impact and stand.
                 constrained = constrained & ~flight_ended
+            release_angle = self.cfg.full_authority_after_angle_rad
+            if release_angle is not None:
+                progress = getattr(self._env, "_backflip_max", None)
+                if progress is not None:
+                    # Preserve the nominal-PD teacher through launch and tuck,
+                    # then let the actor actively extend and brake before
+                    # impact. The virtual-spotter pulse has ended well before
+                    # this phase, so releasing action authority does not add
+                    # external energy to the touchdown controller.
+                    constrained = constrained & (progress < float(release_angle))
             effective_assist = constrained.to(self._processed_actions.dtype).unsqueeze(1)
             effective_assist = effective_assist * assist
         authority = minimum + (1.0 - minimum) * (1.0 - effective_assist)

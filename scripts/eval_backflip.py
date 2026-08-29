@@ -104,6 +104,9 @@ def evaluate(
     recovery_profile: str | None = None,
     recovery_switch_mode: str = "landing",
     post_landing_checkpoint: Path | None = None,
+    recovery_approach_angle_deg: float = 330.0,
+    recovery_approach_tilt_deg: float = 40.0,
+    recovery_approach_height_m: float = 0.36,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -119,6 +122,12 @@ def evaluate(
     configure_backflip_standing_eval(env_cfg)
     if assist_scale < 0.0 or assist_scale > 1.0:
         raise ValueError("assist_scale must be in [0, 1]")
+    if not 0.0 <= recovery_approach_angle_deg <= 360.0:
+        raise ValueError("recovery_approach_angle_deg must be in [0, 360]")
+    if not 0.0 <= recovery_approach_tilt_deg <= 180.0:
+        raise ValueError("recovery_approach_tilt_deg must be in [0, 180]")
+    if recovery_approach_height_m <= 0.0:
+        raise ValueError("recovery_approach_height_m must be positive")
     env_cfg.events["set_backflip_state"].params["initial_assist_scale"] = assist_scale
     assist_cfg = env_cfg.events["backflip_assistive_wrench"].params
     if assist_force_n is not None:
@@ -333,14 +342,29 @@ def evaluate(
                     robot_state.root_link_pos_w[:, 2]
                     - base_env.scene.terrain.env_origins[:, 2]
                 )
-                recovery_active |= (
+                approach_now = (
                     launched_now
                     & ~base_env._backflip_flight_ended_latch
-                    & (base_env._backflip_max >= math.radians(330.0))
-                    & (upright_now >= math.cos(math.radians(40.0)))
-                    & (relative_z <= 0.36)
+                    & (
+                        base_env._backflip_max
+                        >= math.radians(recovery_approach_angle_deg)
+                    )
+                    & (
+                        upright_now
+                        >= math.cos(math.radians(recovery_approach_tilt_deg))
+                    )
+                    & (relative_z <= recovery_approach_height_m)
                     & (robot_state.root_link_lin_vel_w[:, 2] < 0.0)
                 )
+                recovery_active |= approach_now
+                # The assisted launch actor is deliberately restricted to a
+                # small residual around nominal PD. A zero-assist touchdown
+                # specialist was trained with full joint-target authority, so
+                # selecting it while leaving that clamp active is not a real
+                # policy hand-off. The spotter pulse has already ended by this
+                # late-flight gate; clear eligibility only for switched worlds
+                # so the next specialist action uses its training authority.
+                base_env._backflip_assist_eligible &= ~approach_now
             first_takeoff = launched_now & ~launched
             first_300 = (base_env._backflip_max >= math.radians(300.0)) & ~rotated_300
             first_landing = landed_now & ~landed
@@ -588,6 +612,12 @@ def evaluate(
         "start_mode": start_mode,
         "recovery_profile": recovery_profile,
         "recovery_switch_mode": recovery_switch_mode,
+        "recovery_approach_gate": {
+            "angle_deg": recovery_approach_angle_deg,
+            "tilt_deg": recovery_approach_tilt_deg,
+            "height_m": recovery_approach_height_m,
+            "descending": True,
+        },
         "standing_start_only": start_mode == "standing",
         "assist_scale": assist_scale,
         "assist_wrench": {
@@ -747,6 +777,24 @@ def main() -> None:
         help="Optional third actor activated after the validated landing latch",
     )
     parser.add_argument(
+        "--recovery-approach-angle-deg",
+        type=float,
+        default=330.0,
+        help="Minimum completed rotation before an approach hand-off",
+    )
+    parser.add_argument(
+        "--recovery-approach-tilt-deg",
+        type=float,
+        default=40.0,
+        help="Maximum upright tilt before an approach hand-off",
+    )
+    parser.add_argument(
+        "--recovery-approach-height-m",
+        type=float,
+        default=0.36,
+        help="Maximum root height before an approach hand-off",
+    )
+    parser.add_argument(
         "--trace-output",
         type=Path,
         help="Write per-step kinematics and policy actions for environment zero",
@@ -771,6 +819,9 @@ def main() -> None:
         args.recovery_profile,
         args.recovery_switch_mode,
         args.post_landing_checkpoint,
+        args.recovery_approach_angle_deg,
+        args.recovery_approach_tilt_deg,
+        args.recovery_approach_height_m,
     )
 
 

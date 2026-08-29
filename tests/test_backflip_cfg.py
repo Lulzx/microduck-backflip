@@ -12,6 +12,7 @@ from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     make_microduck_backflip_recovery_env_cfg,
     make_microduck_backflip_touchdown_env_cfg,
     make_microduck_backflip_pedestal_env_cfg,
+    make_microduck_backflip_pedestal_braking_env_cfg,
 )
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
     PEDESTAL_HEIGHT,
@@ -173,6 +174,27 @@ def test_touchdown_specialist_starts_airborne_and_expands_approach_distribution(
     ]["midflight_angle_range"][0]
     assert stages[-1]["params"]["midflight_omega_range"][1] >= 20.0
     assert stages[-1]["params"]["midflight_z_range"][1] >= 0.35
+
+
+def test_pedestal_braking_finetune_releases_late_flight_authority():
+    cfg = make_microduck_backflip_pedestal_braking_env_cfg()
+    action = cfg.actions["joint_pos"]
+    assert isinstance(action, BackflipResidualJointPositionActionCfg)
+    assert action.full_authority_after_angle_rad == math.radians(280.0)
+    reset = cfg.events["set_backflip_state"].params
+    assert reset["standing_prob"] > reset["midflight_prob"] > 0.0
+    assert reset["recovery_prob"] == 0.0
+    stages = cfg.curriculum["backflip_spawn_mix"].params["param_stages"]
+    assert stages[-1]["params"]["standing_prob"] == 1.0
+    assert stages[-1]["params"]["midflight_prob"] == 0.0
+    assert cfg.rewards["backflip_late_pitch_rate"].params["gate_lo"] == math.radians(
+        280.0
+    )
+    assert cfg.rewards["backflip_rotation_overshoot"].weight < 0.0
+    assert (
+        cfg.terminations["backflip_body_only_contact"].func
+        is microduck_mdp.backflip_postflight_body_only_contact
+    )
 
 
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():

@@ -536,6 +536,50 @@ WARP_NUM_THREADS=2 .venv/bin/python scripts/eval_backflip.py \
   --output results/research_pedestal_v30_three_stage_rebased_env44_render_seed42.json
 ```
 
+**2026-08-29 19:06-19:12 IST — v31/v32 approach-gate sweep and integrated braking task.**
+
+- A 3x64 standing-cube sweep moved the touchdown hand-off earlier: model 350
+  at 320°/60°/0.42 m and 300°/80°/0.45 m, plus model 400 at
+  310°/70°/0.45 m. With the inherited assisted residual clamp, all three were
+  effectively identical to v30: 0 strict landings, 4/64 landing latches, and
+  at most 0.02 s posture hold. This falsified the hypothesis that switching a
+  few control ticks earlier was sufficient.
+- Control-path inspection found that the evaluator selected the zero-assist
+  touchdown actor but `BackflipResidualJointPositionAction` still limited its
+  pre-contact targets to 5% authority because the launch episode retained
+  assist eligibility. The evaluator now clears that eligibility only when the
+  approach hand-off fires. The 3x64 full-authority repeat changed mechanics
+  (best maximum contact rotation fell from 416.70° to 395.82° and maximum
+  posture hold rose from 0.02 to 0.04 s) but still yielded 0/64 strict holds.
+  Earlier model-350 control at 300° reduced landing latches to 2/64, showing
+  that an abrupt actor swap also has a transition-distribution cost.
+- Added `Mjlab-BackflipBrake-Pedestal-MicroDuck`, an integrated continuation
+  inspired by segment sampling and iterative motion imitation in the research
+  plan. It protects the assisted launch teacher through 280°, then restores
+  full late-flight authority to the same phase-conditioned actor. Reset mix is
+  75% cube standing / 25% ballistic late flight, progressing to 100% cube
+  standing at iteration 200. Strong late-pitch, overshoot, landing-approach,
+  and post-flight body-impact objectives are active from the first update.
+- Focused tests: 37 passed. A 16-world warm-start smoke update completed at
+  iteration 200/201 with no NaN termination and nonzero late-pitch (-2.5683),
+  overshoot (-4.2748), approach (+0.2630), and preparation (+1.1897) returns.
+  Mean episode length was 8.60 steps and strict-success return remained zero;
+  this proves the intended learning signals execute, not that they solve the
+  maneuver.
+
+Planned integrated run command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-BackflipBrake-Pedestal-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 300 --agent.save-interval 25 \
+  --agent.run-name integrated-late-braking-v1-256 \
+  --agent.logger tensorboard --agent.resume True \
+  --agent.load-run warmstart-pedestal-model200 \
+  --agent.load-checkpoint model_200.pt
+```
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:
