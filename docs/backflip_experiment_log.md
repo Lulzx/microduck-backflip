@@ -210,6 +210,17 @@ observations, reward, or success semantics.
 - These videos are diagnostic evidence only. Neither proves an autonomous
   standing-start backflip.
 
+**2026-08-29 17:30 IST — model 175, recovery starts, seed 42, 64 episodes.**
+
+- Strict stable landing: 0/64; body-only contact: 60/64 (93.75%).
+- Longest posture-only hold: mean 0.090 s, maximum 0.22 s.
+- Longest strict hold: mean 0.0266 s, maximum 0.08 s.
+- Decision: model 50 remains the best verified v26 checkpoint and the published
+  videos remain current. Continue the run through the planned spawn-mixture
+  transition rather than promoting the numerically newest checkpoint.
+- Evidence: `results/research_efgcl_v26_model175_recovery_seed42.json` (local,
+  not in the curated public evidence set).
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:
