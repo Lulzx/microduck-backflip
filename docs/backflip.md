@@ -241,6 +241,14 @@ strict hold), 0.70 s is still insufficient (0.28 s), and 0.80 s produces one
 initial collision; training must learn both impact absorption and subsequent
 balance, not merely imitate the first contact pose.
 
+`Mjlab-BackflipLaunch650HarnessRecovery-Pedestal-MicroDuck` is the corresponding
+recovery curriculum. Every episode starts from one of 115 real composed-policy
+states captured at 260 degrees across seeds 40-47, restores previous-action
+history, and rebases the recovery actor to local phase. It begins with the
+measured 0.16 Nms/rad, 0.40 Nm, 0.80 s harness frontier. Continuations shorten
+duration before lowering gain; scores from this reverse-curriculum task do not
+count as complete standing-start backflips.
+
 Before export, require three 128-episode batteries with seeds 42, 123, and 2026:
 
 - takeoff rate at least 99%;

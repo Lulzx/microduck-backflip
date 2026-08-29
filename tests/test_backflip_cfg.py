@@ -18,6 +18,7 @@ from mjlab_microduck.tasks.backflip_pedestal_terrain import (
 from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     MicroduckBackflipCubeLaunchRlCfg,
     MicroduckBackflipLaunch650FloorRlCfg,
+    MicroduckBackflipLaunch650HarnessRecoveryRlCfg,
     MicroduckBackflipLaunch650MatApproachRlCfg,
     MicroduckBackflipLaunch650MatLandingRlCfg,
     MicroduckBackflipRlCfg,
@@ -28,6 +29,7 @@ from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     make_microduck_backflip_early_reference_env_cfg,
     make_microduck_backflip_env_cfg,
     make_microduck_backflip_launch650_floor_reference_env_cfg,
+    make_microduck_backflip_launch650_harness_recovery_env_cfg,
     make_microduck_backflip_launch650_mat_approach_env_cfg,
     make_microduck_backflip_launch650_mat_landing_env_cfg,
     make_microduck_backflip_mat_current_mixed_env_cfg,
@@ -426,6 +428,22 @@ def test_launch650_mat_approach_uses_deterministic_precontact_states():
     assert capture["source_seeds"] == list(range(40, 48))
     assert len(capture["snapshots"]) >= 100
     assert MicroduckBackflipLaunch650MatApproachRlCfg.algorithm.learning_rate <= 1e-4
+
+
+def test_launch650_harness_recovery_matches_live_handoff_and_bounds_assist():
+    cfg = make_microduck_backflip_launch650_harness_recovery_env_cfg()
+    reset = cfg.events["set_backflip_state"].params
+    assist = cfg.events["backflip_assistive_wrench"].params
+    assert reset["local_phase"] is True
+    assert reset["restore_previous_action"] is True
+    assert reset["initial_assist_scale"] == 1.0
+    assert assist["landing_damping_gain_nm_per_rad_s"] == 0.16
+    assert assist["landing_damping_max_nm"] == 0.40
+    assert assist["landing_damping_duration_s"] == 0.80
+    assert (
+        MicroduckBackflipLaunch650HarnessRecoveryRlCfg.experiment_name
+        == "microduck_backflip_launch650_harness_recovery"
+    )
 
 
 def test_cube_launch_specialist_breaks_the_assist_authority_deadlock():

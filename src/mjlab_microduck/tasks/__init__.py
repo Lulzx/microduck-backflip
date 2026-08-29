@@ -79,6 +79,7 @@ from .microduck_backflip_env_cfg import (
     make_microduck_backflip_mat_landing_reference_env_cfg,
     make_microduck_backflip_launch650_mat_landing_env_cfg,
     make_microduck_backflip_launch650_mat_approach_env_cfg,
+    make_microduck_backflip_launch650_harness_recovery_env_cfg,
     make_microduck_backflip_mat_mixed_reference_env_cfg,
     make_microduck_backflip_mat_distillation_env_cfg,
     make_microduck_backflip_soft_mat_distillation_env_cfg,
@@ -100,6 +101,7 @@ from .microduck_backflip_env_cfg import (
     MicroduckBackflipMatLandingReferenceRlCfg,
     MicroduckBackflipLaunch650MatLandingRlCfg,
     MicroduckBackflipLaunch650MatApproachRlCfg,
+    MicroduckBackflipLaunch650HarnessRecoveryRlCfg,
     MicroduckBackflipMatMixedReferenceRlCfg,
     MicroduckBackflipMatDistillationRlCfg,
     MicroduckBackflipMatCurrentMixedRlCfg,
@@ -204,6 +206,16 @@ register_mjlab_task(
     env_cfg=make_microduck_backflip_launch650_mat_approach_env_cfg(),
     play_env_cfg=make_microduck_backflip_launch650_mat_approach_env_cfg(play=True),
     rl_cfg=MicroduckBackflipLaunch650MatApproachRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Mjlab-BackflipLaunch650HarnessRecovery-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_launch650_harness_recovery_env_cfg(),
+    play_env_cfg=make_microduck_backflip_launch650_harness_recovery_env_cfg(
+        play=True
+    ),
+    rl_cfg=MicroduckBackflipLaunch650HarnessRecoveryRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

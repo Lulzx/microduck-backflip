@@ -883,6 +883,25 @@ shorten duration before reducing gain. The current policy needs continued
 post-impact balance assistance, so an impact-only damper is not yet enough.
 All v89 trials retain the launch pulse and fail autonomous acceptance.
 
+**2026-08-30 00:36 IST — v90 live-approach harness recovery curriculum.**
+
+- Added `Mjlab-BackflipLaunch650HarnessRecovery-Pedestal-MicroDuck`. It samples
+  the 115 committed model-650/model-510 states captured at 260 degrees over
+  seeds 40-47, uses local specialist phase, restores the captured previous
+  action, and initializes assistance scale 1.0.
+- The event configuration exposes all landing-harness parameters and starts at
+  gain 0.16 Nms/rad, cap 0.40 Nm, duration 0.80 s. The reference reset now
+  accepts an explicit initial assistance scale; the default remains zero.
+- A two-update, 16-world CPU smoke continuation from the published v44
+  `model_510.pt` completed iterations 510-511 without nonfinite state. Both
+  approach and landing rewards were finite/nonzero, and the trainer saved its
+  captured source diff under
+  `logs/rsl_rl/microduck_backflip_launch650_harness_recovery/2026-08-30_00-36-05_smoke-v90-harness-recovery-16`.
+
+Decision: run a 256-world continuation, screen every saved checkpoint on the
+live standing composition, and promote only reductions in required harness
+duration or zero-harness improvement.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

@@ -183,6 +183,9 @@ def make_microduck_backflip_env_cfg(play: bool = False):
             "end_time_s": 0.40,
             "upward_force_n": 16.0,
             "backward_pitch_torque_nm": 1.40,
+            "landing_damping_gain_nm_per_rad_s": 0.0,
+            "landing_damping_max_nm": 0.0,
+            "landing_damping_duration_s": 0.0,
             "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
         },
     )
@@ -998,6 +1001,35 @@ def make_microduck_backflip_launch650_mat_approach_env_cfg(
     return cfg
 
 
+def make_microduck_backflip_launch650_harness_recovery_env_cfg(
+    play: bool = False,
+):
+    """Recover the live model-650/model-510 approach with bounded damping.
+
+    The reset distribution comes from the actual composed maneuver at 260
+    degrees. It restores the recovery actor's action history and uses the
+    empirically validated local phase convention. The 0.8-second harness is
+    the shortest tested duration that still exposes a strict success; later
+    continuations shorten it before reducing gain.
+    """
+    cfg = make_microduck_backflip_launch650_mat_approach_env_cfg(play=play)
+    cfg.events["set_backflip_state"].params.update(
+        {
+            "local_phase": True,
+            "restore_previous_action": True,
+            "initial_assist_scale": 1.0,
+        }
+    )
+    cfg.events["backflip_assistive_wrench"].params.update(
+        {
+            "landing_damping_gain_nm_per_rad_s": 0.16,
+            "landing_damping_max_nm": 0.40,
+            "landing_damping_duration_s": 0.80,
+        }
+    )
+    return cfg
+
+
 def make_microduck_backflip_mat_mixed_reference_env_cfg(
     play: bool = False,
     flight_reference_state_path: Path = EARLY_REFERENCE_STATE_PATH,
@@ -1388,6 +1420,16 @@ MicroduckBackflipLaunch650MatApproachRlCfg.run_name = (
 )
 MicroduckBackflipLaunch650MatApproachRlCfg.algorithm.learning_rate = 1.0e-4
 MicroduckBackflipLaunch650MatApproachRlCfg.algorithm.entropy_coef = 0.001
+
+MicroduckBackflipLaunch650HarnessRecoveryRlCfg = deepcopy(
+    MicroduckBackflipLaunch650MatApproachRlCfg
+)
+MicroduckBackflipLaunch650HarnessRecoveryRlCfg.experiment_name = (
+    "microduck_backflip_launch650_harness_recovery"
+)
+MicroduckBackflipLaunch650HarnessRecoveryRlCfg.run_name = (
+    "microduck_backflip_launch650_harness_recovery"
+)
 
 MicroduckBackflipMatMixedReferenceRlCfg = deepcopy(
     MicroduckBackflipMatReferenceRlCfg

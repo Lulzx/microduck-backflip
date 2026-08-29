@@ -8144,6 +8144,7 @@ def reset_backflip_reference_state(
     landing_latched: bool = False,
     local_phase: bool = False,
     restore_previous_action: bool = False,
+    initial_assist_scale: float = 0.0,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ):
     """Reset from full simulator states captured on the real launch policy.
@@ -8172,7 +8173,7 @@ def reset_backflip_reference_state(
         midflight_omega_range=(15.0, 16.0),
         midflight_vz_range=(1.0, 1.01),
         joint_noise_std=0.0,
-        initial_assist_scale=0.0,
+        initial_assist_scale=initial_assist_scale,
         landing_min_horizontal_distance=landing_min_horizontal_distance,
     )
     references = _load_backflip_reference_states(reference_state_path)
