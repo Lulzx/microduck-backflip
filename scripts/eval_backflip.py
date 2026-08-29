@@ -67,6 +67,24 @@ def _finite_time_summary(x: torch.Tensor) -> dict[str, float | None]:
     return _summary(finite)
 
 
+def _specialist_observation(
+    obs: torch.Tensor, elapsed_steps: torch.Tensor, step_dt: float
+) -> torch.Tensor:
+    """Rebase the two backflip context slots to a specialist-local episode.
+
+    Actor indices 55:61 are the reused body-command slots. Specialists were
+    trained with their own phase starting at zero and without the launch
+    spotter, so forwarding the parent episode's phase/assist values is an
+    observation-distribution error even though physical state is shared.
+    """
+    specialist_obs = obs.clone()
+    elapsed_s = elapsed_steps.to(specialist_obs.dtype) * float(step_dt)
+    x = elapsed_s / 0.30
+    specialist_obs[:, 55] = x.pow(3) / (1.0 + x.pow(3))
+    specialist_obs[:, 56] = 0.0
+    return specialist_obs
+
+
 def evaluate(
     checkpoint: Path,
     num_envs: int,
@@ -85,6 +103,7 @@ def evaluate(
     recovery_checkpoint: Path | None = None,
     recovery_profile: str | None = None,
     recovery_switch_mode: str = "landing",
+    post_landing_checkpoint: Path | None = None,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -204,6 +223,20 @@ def evaluate(
             map_location=device,
         )
         recovery_policy = recovery_runner.get_inference_policy(device=device)
+    post_landing_policy = None
+    if post_landing_checkpoint is not None:
+        if recovery_checkpoint is None:
+            raise ValueError(
+                "post_landing_checkpoint requires an approach/recovery checkpoint"
+            )
+        post_landing_runner = runner_cls(env, asdict(agent_cfg), device=device)
+        post_landing_runner.load(
+            str(post_landing_checkpoint),
+            load_cfg={"actor": True},
+            strict=True,
+            map_location=device,
+        )
+        post_landing_policy = post_landing_runner.get_inference_policy(device=device)
 
     obs = env.get_observations()
     launched = torch.zeros(num_envs, dtype=torch.bool, device=device)
@@ -223,6 +256,11 @@ def evaluate(
     body_contact = torch.zeros_like(launched)
     nonfinite_state = torch.zeros_like(launched)
     recovery_active = torch.zeros_like(launched)
+    post_landing_active = torch.zeros_like(launched)
+    recovery_elapsed_steps = torch.zeros(
+        num_envs, dtype=torch.long, device=device
+    )
+    post_landing_elapsed_steps = torch.zeros_like(recovery_elapsed_steps)
     peak_z = torch.zeros(num_envs, device=device)
     peak_rotation = torch.zeros(num_envs, device=device)
     peak_ang_vel = torch.zeros(num_envs, device=device)
@@ -256,11 +294,27 @@ def evaluate(
         for step in range(base_env.max_episode_length):
             actions = policy(obs)
             if recovery_policy is not None and recovery_active.any():
-                recovery_actions = recovery_policy(obs)
+                recovery_obs = _specialist_observation(
+                    obs, recovery_elapsed_steps, base_env.step_dt
+                )
+                recovery_actions = recovery_policy(recovery_obs)
                 actions = torch.where(
                     recovery_active.unsqueeze(1), recovery_actions, actions
                 )
+            if post_landing_policy is not None and post_landing_active.any():
+                post_landing_obs = _specialist_observation(
+                    obs, post_landing_elapsed_steps, base_env.step_dt
+                )
+                post_landing_actions = post_landing_policy(post_landing_obs)
+                actions = torch.where(
+                    post_landing_active.unsqueeze(1), post_landing_actions, actions
+                )
             obs, _, _, _ = env.step(actions)
+            # Count only steps on which a specialist actually acted. Newly
+            # activated worlds therefore see local phase zero on their first
+            # specialist action at the next control tick.
+            recovery_elapsed_steps += recovery_active.long()
+            post_landing_elapsed_steps += post_landing_active.long()
             now = (step + 1) * base_env.step_dt
             launched_now = base_env._backflip_airborne_latch
             landed_now = base_env._backflip_landed_latch
@@ -268,6 +322,7 @@ def evaluate(
             # only after the state machine validates a rotated, upright,
             # feet-first contact clear of the launch surface.
             recovery_active |= landed_now
+            post_landing_active |= landed_now
             if recovery_policy is not None and recovery_switch_mode == "approach":
                 robot_state = base_env.scene["robot"].data
                 quat_now = robot_state.root_link_quat_w
@@ -471,6 +526,9 @@ def evaluate(
                         "recovery_policy_active": bool(
                             recovery_active[trace_idx].item()
                         ),
+                        "post_landing_policy_active": bool(
+                            post_landing_active[trace_idx].item()
+                        ),
                         "action": [float(x) for x in actions[trace_idx].tolist()],
                     }
                 )
@@ -519,6 +577,11 @@ def evaluate(
             if recovery_checkpoint is not None
             else None
         ),
+        "post_landing_checkpoint": (
+            str(post_landing_checkpoint.resolve())
+            if post_landing_checkpoint is not None
+            else None
+        ),
         "device": device,
         "seed": seed,
         "episodes": num_envs,
@@ -550,6 +613,9 @@ def evaluate(
             "nonfinite_state": float(nonfinite_state.float().mean().item()),
             "recovery_policy_activated": float(
                 recovery_active.float().mean().item()
+            ),
+            "post_landing_policy_activated": float(
+                post_landing_active.float().mean().item()
             ),
             "ever_landing_feet": float(ever_landing_feet.float().mean().item()),
             "ever_landing_upright": float(
@@ -676,6 +742,11 @@ def main() -> None:
         help="Activate the specialist at validated contact or during final approach",
     )
     parser.add_argument(
+        "--post-landing-checkpoint",
+        type=Path,
+        help="Optional third actor activated after the validated landing latch",
+    )
+    parser.add_argument(
         "--trace-output",
         type=Path,
         help="Write per-step kinematics and policy actions for environment zero",
@@ -699,6 +770,7 @@ def main() -> None:
         args.recovery_checkpoint,
         args.recovery_profile,
         args.recovery_switch_mode,
+        args.post_landing_checkpoint,
     )
 
 

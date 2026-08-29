@@ -489,6 +489,53 @@ WARP_NUM_THREADS=12 .venv/bin/microduck-train \
 Run directory:
 `logs/rsl_rl/microduck_backflip_touchdown/2026-08-29_18-44-16_late-flight-v2-braking-256`.
 
+**2026-08-29 18:46-19:05 IST — v30 checkpoint sweep, three-stage composition, and published cube attempt.**
+
+- The corrected late-flight run was evaluated every 25 iterations from model
+  275 through 400. Model 350 was the best strict precursor: 64/64 landing
+  latches, 39/64 episodes reaching the low-angular-speed predicate, and a
+  maximum strict-landing hold of 0.14 s. Later checkpoints improved the
+  isolated low-speed rate (52/64 at model 400) but shortened the best strict
+  hold to 0.10 s. No checkpoint met the required 0.50 s hold.
+- A three-stage evaluator now supports launch, final-approach, and post-contact
+  actors. Its first composition exposed an observation-distribution bug: the
+  specialists received the parent episode's absolute phase and active-assist
+  context even though both were trained from local phase zero without a
+  spotter. The evaluator now clones the observation and rebases actor context
+  slots 55 and 56 to specialist-local phase and zero assistance at each
+  hand-off.
+- Standing cube evaluation after rebasing used seed 42 and 64 worlds. It
+  produced 6/64 rotations >=300 degrees, 4/64 valid feet-first landing
+  latches, 0/64 strict 0.50 s landings, and no non-finite states. Thus the
+  observation fix improved compositional validity but did not solve impact
+  stabilization.
+- Environment 44 was selected for visual evidence because it reached 359.65
+  degrees and a valid feet-first latch. It took off at 0.34 s, crossed 300
+  degrees at 0.66 s, activated the touchdown specialist near 340 degrees at
+  0.70 s, and contacted at 0.74 s with 12.92 degrees tilt but 14.15 rad/s
+  angular speed. It then collapsed forward; the maximum strict hold was 0 s.
+- The verified 1280x720, 50 fps, 4.0 s H.264 video is
+  `results/videos/v30-three-stage-rebased-env44/backflip-model_200-standing-step-0.mp4`.
+  Its per-control-step trace is
+  `results/traces/v30-three-stage-rebased-env44.json`. This is a diagnostic
+  near-success, not a successful backflip landing and not hardware evidence.
+
+Exact render command:
+
+```bash
+WARP_NUM_THREADS=2 .venv/bin/python scripts/eval_backflip.py \
+  logs/rsl_rl/microduck_backflip_pedestal/2026-08-29_17-46-31_pedestal-v1-model50-warmstart-256/model_200.pt \
+  --task-id Mjlab-Backflip-Pedestal-MicroDuck --num-envs 64 --seed 42 \
+  --start-mode standing --assist-scale 1 \
+  --recovery-checkpoint logs/rsl_rl/microduck_backflip_touchdown/2026-08-29_18-44-16_late-flight-v2-braking-256/model_350.pt \
+  --recovery-switch-mode approach \
+  --post-landing-checkpoint logs/rsl_rl/microduck_backflip_recovery/2026-08-29_18-07-19_impact-recovery-v1-model50-warmstart-256/model_150.pt \
+  --render-env-index 44 \
+  --video-dir results/videos/v30-three-stage-rebased-env44 \
+  --trace-output results/traces/v30-three-stage-rebased-env44.json \
+  --output results/research_pedestal_v30_three_stage_rebased_env44_render_seed42.json
+```
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:
