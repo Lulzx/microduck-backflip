@@ -1,0 +1,199 @@
+# MicroDuck backflip
+
+`Mjlab-Backflip-Flat-MicroDuck` is an episodic standing backflip: leave the
+ground, rotate backward through one revolution in the sagittal plane, touch
+down on the feet, and settle upright. It is not considered trained merely
+because PPO reward rises.
+
+The continuously updated hypotheses, commands, failures, checkpoint metrics,
+and decisions are recorded in the
+[backflip experiment log](backflip_experiment_log.md). Paper-derived design
+rationale is kept separately in [backflip research](backflip_research.md).
+
+## What counts
+
+The task state machine requires all of the following, in order:
+
+1. The feet supported the robot at the start.
+2. The whole robot became collision-free above 0.135 m trunk height.
+3. Backward pitch accumulated during one uninterrupted flight. The first
+   ground recontact freezes the rotation frontier, so a bounce cannot be
+   combined with a second hop. Ground rolls receive zero rotation credit,
+   forward rotation cannot advance the frontier, and corkscrew rotation is
+   continuously attenuated.
+4. At least 320 degrees of airborne backward rotation occurred before an
+   upright feet contact can latch a landing.
+5. Evaluation separately requires the robot to remain continuously on its
+   feet for 0.5 seconds, within 20 degrees of upright, above 0.095 m trunk
+   height, and below 2 rad/s angular speed. A transient feet touch followed by
+   a fall is not a stable success.
+
+Supported crouch and mid-flight reset states are reverse-curriculum training
+data: the former teaches preload-to-launch extension and the latter teaches
+the landing half. They never count as full evaluation episodes;
+`scripts/eval_backflip.py` forces ordinary standing starts.
+
+The current discovery task also uses an EFGCL-style virtual spotter: a 16 N
+upward force and 1.40 Nm backward-pitch torque from 0.30 to 0.40 seconds. Its
+scale drops only after a 60% strict landing rate over an evaluation window.
+The policy observes bounded episode phase and assistance scale in two existing
+body-command slots, preserving the 61-D network shape. Strict evaluation sets
+the assistance scale to zero. Launch shaping is multiplied by
+`1 - assist_scale`, so the actor cannot receive credit for force supplied by
+the spotter; rotation and landing rewards remain active. See
+[the research rationale](backflip_research.md).
+
+The assisted phase also penalizes action magnitude in proportion to the
+spotter scale, because zero action tracks the nominal PD pose that produced a
+57.8% landing latch in the open-loop sweep. A separate pitch-rate cost activates
+only after 300 degrees to teach extension/braking without weakening takeoff.
+The action term additionally treats PPO as a bounded residual controller: it
+has 5% target-displacement authority during fully assisted launch/flight,
+switches to 100% immediately after recontact for recovery, and linearly regains
+100% pre-contact authority as assistance reaches zero. Strict evaluation is
+therefore the ordinary full-authority policy, not a permanently constrained
+controller.
+Unassisted reverse-curriculum worlds retain full authority regardless of the
+global stage. Assistance can decay only after the same continuous 0.5-second
+stable hold used by the evaluator; a one-frame feet touch is not curriculum
+success.
+
+## Reproduce training
+
+First run the CPU tests and the mandatory small smoke test:
+
+```bash
+uv sync
+uv run --with pytest python -m pytest tests/
+CUDA_VISIBLE_DEVICES='' uv run microduck-train Mjlab-Backflip-Flat-MicroDuck \
+  --gpu-ids None --env.scene.num-envs 64 --agent.max-iterations 5 \
+  --agent.logger tensorboard
+```
+
+For CUDA training:
+
+```bash
+uv run microduck-train Mjlab-Backflip-Flat-MicroDuck \
+  --env.scene.num-envs 4096 --agent.max-iterations 5000
+```
+
+Apple Silicon note: PyTorch can expose the Metal/MPS device, but this task's
+physics runs through NVIDIA Warp. Warp 1.12 in the reproducible environment
+accepts CPU and CUDA devices only; constructing `ManagerBasedRlEnv` with
+`device="mps"` fails with `ValueError: Invalid device identifier: mps`.
+Moving only PPO to MPS is not a useful shortcut: in the measured 256-env CPU
+run, physics collection takes about 8.1 seconds per iteration while learning
+takes about 0.23 seconds.
+
+The experimental CuMetal probe is a narrower, measured result. It captures a
+real Warp-generated CUDA `add_one` kernel, compiles the selected forward entry
+through `/Users/lulzx/work/cumetal`, and executes it on Metal. On the Apple M4
+Pro, numerical readback was `[0,1,2,3,4,5,6,7] -> [1,2,3,4,5,6,7,8]`. Reproduce
+the compiler boundary with:
+
+```bash
+CUMETAL_CACHE_DIR=/tmp/cumetal-warp-cache \
+  uv run python scripts/probe_cumetal_warp.py \
+  --output-dir results/cumetal_warp_probe --arch 80
+```
+
+This does **not** yet make `wp.get_devices()` expose a CuMetal device or move
+MuJoCo Warp physics to the Apple GPU. That requires a CuMetal-backed Warp core,
+module/launch integration, and shared-memory Torch interop. Until those runtime
+pieces are implemented and the full simulator passes numerical parity tests,
+local training remains CPU-backed; the probe must not be described as
+GPU-accelerated backflip training.
+
+The unambiguous `microduck-train` executable is intentional. Both this project
+and the `mjlab` dependency publish an executable named `train`, and a fresh uv
+environment can select the dependency's entry point, which does not understand
+`--hf-jobs`.
+
+Evaluate a local checkpoint on domain-randomized standing starts:
+
+```bash
+uv run python scripts/eval_backflip.py \
+  logs/rsl_rl/microduck_backflip/<run>/model_5000.pt \
+  --num-envs 128 --seed 42 \
+  --output results/backflip_eval_seed42.json
+```
+
+Before export, require three 128-episode batteries with seeds 42, 123, and 2026:
+
+- takeoff rate at least 99%;
+- at least 95% reach 340 degrees of airborne backward rotation;
+- at least 90% achieve a stable landing;
+- no NaN termination;
+- no obvious head, trunk, or shoulder landings on recorded rollouts.
+
+Then repeat on `Mjlab-Backflip-Flat-Backlash-MicroDuck`; require at least 80%
+stable landings. These are project acceptance gates, not proof that the real
+robot will succeed.
+
+## Export and daemon rehearsal
+
+Always export through the repository script so the observation normalizer is
+baked into ONNX:
+
+```bash
+uv run python scripts/export.py Mjlab-Backflip-Flat-MicroDuck \
+  --checkpoint-file logs/rsl_rl/microduck_backflip/<run>/model_5000.pt \
+  --num-envs 1 --onnx-file backflip.onnx
+```
+
+Rehearse the daemon observation/action contract in CPU MuJoCo, using the
+existing episodic `roulade` slot and `R` trigger:
+
+```bash
+uv run python scripts/infer_policy.py \
+  --walking walk.onnx --standing stand.onnx \
+  --roulade backflip.onnx --roulade-duration 2.0 --new-cmd-obs
+```
+
+Do not copy the ONNX to a robot until this rehearsal loads a 61-input,
+14-output model and visually repeats the accepted behavior.
+
+## Physical-robot safety gate
+
+A backflip is a high-impact maneuver. Simulation, ONNX export, or a daemon
+load is not hardware validation. The first physical attempt must be treated as
+an experiment with an operator able to cut torque immediately.
+
+Prerequisites:
+
+- inspect feet, shells, fasteners, servo horns, cable routing, battery
+  retention, and neck/head clearances;
+- use a fully charged healthy battery and record voltage, servo temperature,
+  current, IMU, commanded targets, and loop deadline counters;
+- use a clear padded area with no people, animals, furniture, or hard edges in
+  the fall envelope;
+- use an overhead fall-arrest line that cannot enter the joints, with enough
+  slack not to assist the jump but short enough to prevent a head-first floor
+  impact;
+- have one operator on the trigger and another on an immediate torque-off;
+- begin with a single attempt, then inspect hardware and logs before any
+  repeat. Never chain the trigger during bring-up.
+
+Runtime compatibility must be resolved explicitly. The training policy is
+unfiltered, while the current `microduck` daemon applies its global head/leg
+low-pass to every network, including the `roulade` slot. Do one of the
+following before hardware use:
+
+1. add and test a dedicated unfiltered backflip/episodic slot in `robotd`; or
+2. for an isolated padded test configuration, set `head_lowpass = 1.0` and
+   `legs_lowpass = 1.0`, and do not use that configuration for ordinary
+   walking policies trained with filtering.
+
+The daemon's limp-fall predictor already excludes a busy roulade window; that
+exclusion must remain active for the full backflip duration or it will cut gain
+mid-rotation. Set the episodic duration from measured simulation timing with a
+small landing margin, not by guessing. Keep the normal joint clamps, bus error
+handling, deadman, battery shutdown, and telemetry enabled.
+
+Stop after any body/head contact, cable snag, missed control deadline, bus
+error burst, unexpected current/temperature rise, damaged part, or behavior
+outside the simulation envelope. A failed attempt is not a reason to increase
+action scale or gain without a new simulation experiment.
+
+Only a witnessed, logged physical trial can support a statement that the real
+MicroDuck performed a backflip. Until then, report simulation success only.

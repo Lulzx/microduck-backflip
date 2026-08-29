@@ -34,6 +34,18 @@ claude_experiments/
 
 backup_onnx/
 
+# Backflip research produces many checkpoint evaluations, traces, videos, and
+# compiler probes. Keep the directory private-by-default and force-add only the
+# small evidence files listed in results/README.md.
+results/*
+!results/README.md
+
+# Abandoned CuMetal/Warp compatibility probe; not part of the supported CPU or
+# CUDA training pipeline.
+scripts/cumetal_warp_headers/
+scripts/probe_cumetal_warp.py
+scripts/run_cumetal_warp_probe.mm
+
 
 logdir/.claude/
 logdir/

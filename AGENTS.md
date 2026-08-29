@@ -20,6 +20,10 @@ uv run scripts/infer_policy.py --walking out.onnx   # CPU MuJoCo deployment rehe
 uv run --with pytest pytest tests/
 ```
 
+If a fresh uv environment resolves the dependency's colliding `train`
+entrypoint instead of this repository's wrapper, use the unambiguous
+`uv run microduck-train ...` alias (required for `--hf-jobs`).
+
 A 5-iteration smoke test at 64 envs catches ~95% of config errors for cents.
 Never launch a long run without one.
 

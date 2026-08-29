@@ -44,6 +44,10 @@ mjlab_microduck = "mjlab_microduck.tasks"
 # Shadows mjlab's `train` entry point: identical behavior, plus a --hf-jobs
 # flag that submits the run to Hugging Face Jobs instead (see train_cli.py).
 train = "mjlab_microduck.train_cli:main"
+# uv may select mjlab's identically-named dependency entry point when both are
+# installed into a fresh environment.  This unambiguous alias is the portable
+# command for local and HF training automation.
+microduck-train = "mjlab_microduck.train_cli:main"
   
 [tool.ruff]
 src = ["src"]  # Helpful for recognizing first-party imports.

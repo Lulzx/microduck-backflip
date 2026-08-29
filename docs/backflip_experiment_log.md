@@ -1,0 +1,228 @@
+# Backflip experiment log
+
+This is the append-oriented laboratory record for the MicroDuck backflip
+project. It records failures as well as successes. Numerical claims must point
+to a JSON result, checkpoint, trace, benchmark, or terminal validation. The
+task definition and safety gates live in [backflip.md](backflip.md); paper
+analysis and first-principles decomposition live in
+[backflip_research.md](backflip_research.md).
+
+## Status snapshot — 2026-08-29 17:16 IST
+
+- Goal: standing start, one uninterrupted airborne backward revolution,
+  feet-first contact, then a strict 0.5 s stable hold in simulation.
+- Hardware claim: **none**. No physical backflip has been attempted or proven.
+- Best strict standing-start checkpoint: v15 `model_1175`; 128/128 takeoffs,
+  mean 145.17 degrees and maximum 274 degrees, no 300-degree flight and no
+  landing. Evidence: `results/threaded_v15_model1175_strict_seed42.json`.
+- Best assisted teacher distribution: untrained 5%-authority phase residual;
+  64/64 takeoffs, 64/64 >=300 degrees, 46/64 >=340 degrees, 46/64 first ground
+  contacts on feet, 33/64 landing latches, and 0/64 strict stable holds.
+  Evidence: `results/phase_residual_authority5_model0_assisted_seed42.json`.
+- Current bottleneck: impact recovery. v25 recovery-start checkpoints 25, 50,
+  and 75 all produced 0/32 strict stable holds.
+- Active run: v26 stage-wise landing, 256 worlds, CPU, seed 42, 600 iterations.
+  Run directory:
+  `logs/rsl_rl/microduck_backflip/2026-08-29_17-14-12_research-efgcl-v26-stagewise-landing-256`.
+
+## Reproducibility envelope
+
+- Source checkout: `/Users/lulzx/work/microduck-backflip/microduck_rl`
+- Source revision at v26 start: `d424a0c` plus the run-captured dirty diff.
+- Python environment: repository `.venv`
+- MuJoCo 3.10.0, Warp 1.12.0, PyTorch 2.9.1
+- Simulator device: Warp CPU on Apple Silicon; CUDA is not available in this
+  build. CuMetal is deliberately out of the active training path.
+- Patched Warp checkout: `/Users/lulzx/work/warp-cpu-threadpool`
+- Training must use `.venv/bin/microduck-train` directly. Running plain
+  `uv run` may synchronize and replace the patched Warp package.
+- Focused validation command:
+
+  ```bash
+  PYTHONPATH=src uv run --python .venv/bin/python --no-sync --with pytest \
+    pytest tests/test_backflip_mdp.py tests/test_backflip_cfg.py -q
+  ```
+
+- v26 validation before launch: 30 passed in 3.97 s; `compileall` and
+  `git diff --check` passed.
+
+## Acceptance gates
+
+One episode succeeds only when it starts standing, takes off above the state
+machine's clearance threshold, accumulates at least 340 degrees of genuine
+backward pitch before first recontact, contacts on the feet, and then remains
+for 25 consecutive 50 Hz control steps with feet contact, trunk height at
+least 0.095 m, tilt under 20 degrees, and angular speed under 2 rad/s.
+
+Final simulation acceptance requires three 128-episode nominal batteries
+(seeds 42, 123, and 2026) with >=99% takeoff, >=95% reaching 340 degrees,
+>=90% strict stable landings, no nonfinite state, and visual rejection of
+head/trunk/shoulder landings. The backlash task must then retain >=80% stable
+landings. These thresholds have **not** been met.
+
+## Simulator performance investigations
+
+Measured physical-step throughput on this machine:
+
+| Backend | Configuration | Physical steps/s | Decision |
+|---|---:|---:|---|
+| MJWarp | Warp CPU, 2048 worlds | 29,722 | Baseline was simulator-bound |
+| MuJoCo C | One thread | 76,825 | Faster per world, not an mjlab drop-in |
+| `mujoco.rollout` | 12 threads, RL-style one-control-step calls | 647,512 at 2048 worlds | Real speed, but exposes state plus sensors rather than mjlab's roughly 45 batched fields |
+| MJWarp | Independent-process proxy, 12 processes | about 166,000 | Approximate 5.5x CPU ceiling |
+
+The Python fan-out prototype cost about 130 microseconds per Warp launch;
+MJWarp issues 137 launches per control step. A correct upstreamable native
+thread pool must live in Warp's native CPU launcher and must first repair CPU
+atomics (`atomic_add` is not atomic in the inspected path). v15/v26 use the
+available patched CPU path, but the backflip result remains the primary goal;
+backend work is not counted as behavior success.
+
+## Chronological experiment ledger
+
+Runs v2-v15 are reconstructed from immutable run names, saved checkpoints,
+and result JSON files. v16 onward includes the decision rationale captured
+during the research pass.
+
+| Version | Hypothesis/change | Measured outcome | Decision |
+|---|---|---|---|
+| v2 | First explicit airborne backflip task and evaluator | Produced saved discovery checkpoints but no accepted standing backflip | Continue reward/state-machine development |
+| v3-v4 | Clean discovery and revised airborne shaping | No accepted full rotation in standing evaluation | Add reverse curriculum and launch-specific signals |
+| v5-v9 | Crouch and mid-flight curricula; successive launch/rotation shaping | Generated partial-motion artifacts, but no strict stable landing | Keep strict standing evaluation separate from curriculum states |
+| v10 | Supported-push reward | Standing launch remained insufficient | Add ballistic feasibility target |
+| v11/v11b | Ballistic feasible-push objective | Improved launch mechanics but did not close rotation/landing | Permit asymmetric strategy and specialize standing launch |
+| v12 | Asymmetric/corkscrew allowance | Best evaluated policies still incomplete | Preserve mild asymmetry but retain airborne-pitch accounting |
+| v13 | Standing-launch specialist | Improved takeoff, insufficient rotation | Add compact flight pose/tuck |
+| v14 | Tuck discovery and native-backend investigation | Native MuJoCo throughput was promising, but backend incompatibility was too large for a drop-in | Continue MJWarp behavior work |
+| v15 | Tuck task on patched threaded CPU path | `model_1175`: takeoff 100%, mean 145.17 degrees, max 274 degrees, stable 0/128 | Strict baseline retained; exploration needs successful trajectories |
+| v16 | First EFGCL virtual spotter implementation | Wrench was not applied correctly; strict takeoff 0/128 | Invalid experiment; repair event semantics |
+| v17 | Validated pulse configuration | A zero-weight reward hook was skipped, so the intended event path was inactive | Invalid experiment; move wrench to a step event |
+| v18 | Live step-event wrench | Assisted policy learned to counteract the spotter because assisted launch rewards were free; model 25 mean rotation 93.16 degrees | Gate launch credit by autonomy |
+| v19 | Multiply launch shaping by `1-assist_scale` | model 25 assisted: >=300 26/64, >=340 8/64, first contact feet 62/64; model 50: >=340 31/32 but mean 558.35 degrees, stable 0 | Exploration solved; overspin/recovery now dominant |
+| v20 | Nominal-action prior plus late pitch braking | model 25 assisted: >=340 32/32 and feet-first latch 5/32; model 50 became bimodal/regressed | Bound assisted action authority directly |
+| v21 | 20% residual authority while fully assisted | model 25: >=340 53/64, landing latch 25/64, stable 0; model 75 mean rotation 454.47 degrees and landing latch 1/32 | Make recovery lexicographically more important |
+| v22 | Recovery-dominant reward | model 25: >=340 27/32, landing latch 5/32, stable 0 | Curriculum success did not match strict evaluator; align definitions |
+| v23 | Stable latch for curriculum, full authority in unassisted reverse states | model 25: >=340 29/32 but first contact feet 4/32 and stable 0 | Assisted residual still corrupts approach and restricts recovery |
+| v24 | 5% assisted residual before impact, 100% after impact | Untrained assisted diagnostic was strong: >=340 46/64, landing latch 33/64; stable 0 | Preserve teacher; isolate landing recovery |
+| v25 | Add 20% recovery starts seeded feet-down, near-upright, full authority | models 25/50/75: stable 0/32. model 50 trace reached 8.6 rad/s yaw, lost foot-only support near 0.38 s, settled on body at 0.060 m | Product landing reward has a collapsed capture basin |
+| v26 | Stage-wise independent upright/height/stillness/foot-support rewards plus one-shot stable-streak frontier | Running; iteration 0 already showed nonzero stability-frontier reward, but strict success remained zero | Evaluate recovery checkpoint 25 before continuing |
+
+## v26 exact run record
+
+Hypothesis: v25 did not lack post-impact samples; it lacked a usable objective
+when one part of the landing state was poor. Replace most of the narrow product
+reward with independent landing-stage objectives, and pay each newly extended
+step of the 25-step stable streak once. Do not loosen strict success.
+
+Code changes:
+
+- `backflip_landing_upright`: broad nonnegative upright score after landing.
+- `backflip_landing_height`: linear capture basin from 0.060 m to standing.
+- `backflip_landing_stillness`: Gaussian angular-speed score with 4 rad/s scale.
+- `backflip_landing_foot_support`: retains foot contact after touchdown.
+- `backflip_stability_progress`: one-shot longest-streak frontier; rebuilding an
+  already-seen short streak pays zero.
+- Narrow landing composite reduced from weight 400 to 100; independent landing
+  weights are 100/75/75/50 and frontier weight is 200.
+- Strict success, assistance decay, standing evaluator, and action authority
+  are unchanged.
+
+Launch command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-Backflip-Flat-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 600 --agent.save-interval 25 \
+  --agent.run-name research-efgcl-v26-stagewise-landing-256 \
+  --agent.logger tensorboard
+```
+
+Initial evidence: 1,177-1,344 environment steps/s during iterations 1-7.
+At iteration 0, mean episode stability-progress return was 0.625 while strict
+success return was 0. This proves the frontier signal is reachable, not that a
+landing has been learned. Next gate: recovery-only evaluation of model 25 over
+at least 32 randomized starts, followed by a per-step trace if stable rate is
+zero.
+
+### v26 checkpoint evaluations
+
+**2026-08-29 17:17 IST — model 25, recovery starts, seed 42, 64 episodes.**
+
+- Stable landing: 0/64.
+- Body-only ground contact: 42/64 (65.625%), improved from 64/64 in v25 model
+  50 over its 32-start diagnostic.
+- Mean time to body-only contact among failures: 0.568 s, versus 0.413 s for
+  v25 model 50.
+- Decision: stage-wise terms improve survival, but checkpoint 25 is too early
+  to establish a strict hold. Continue to model 50 and add condition-specific
+  hold telemetry.
+- Evidence: `results/research_efgcl_v26_model25_recovery_seed42.json` and
+  `results/research_efgcl_v26_model25_recovery_trace_seed42.json`.
+
+**2026-08-29 17:19 IST — model 50, recovery starts, seed 42, 64 episodes.**
+
+- Strict stable landing: **1/64 (1.5625%)**, the first nonzero strict recovery
+  result in v16-v26.
+- Body-only ground contact: 37/64 (57.8125%).
+- Every trial reached each individual condition at least once: feet contact,
+  upright under 20 degrees, height >=0.095 m, and angular speed <2 rad/s. The
+  remaining problem is their simultaneity and duration.
+- Longest feet/upright/height posture hold: mean 0.146 s, median 0.10 s,
+  p90 0.26 s, maximum 1.04 s.
+- Longest fully strict hold: mean 0.0425 s, median 0.02 s, p90 0.06 s,
+  maximum 0.54 s.
+- Decision: hypothesis supported but far below acceptance. Continue v26 and
+  evaluate model 75/100. The angular-speed gate is currently the largest gap
+  between posture-only and strict duration; do not modify the threshold.
+- Evidence: `results/research_efgcl_v26_model50_recovery_seed42.json` and
+  `results/research_efgcl_v26_model50_recovery_trace_seed42.json`.
+
+Evaluator change made after model 25: result JSON now includes longest
+posture-only and strict streak distributions, per-condition ever-hit rates,
+and trace fields for tilt, angular speed, each strict predicate, and current
+stable streak length. This changes diagnostics only, not physics, policy
+observations, reward, or success semantics.
+
+**2026-08-29 17:23 IST — model 100, recovery starts, seed 42, 64 episodes.**
+
+- Strict stable landing: 0/64; body-only contact: 64/64.
+- Longest posture-only hold: mean 0.085 s, maximum 0.20 s.
+- Longest strict hold: mean 0.023 s, maximum 0.04 s.
+- Decision: regression; model 50 remains the promoted recovery checkpoint.
+- Evidence: `results/research_efgcl_v26_model100_recovery_seed42.json` (kept
+  locally; not part of the curated public evidence set).
+
+**2026-08-29 17:26 IST — model 50 visual/provenance pass.**
+
+- Deterministic replay identified environment 29 as the strict recovery
+  success. The selected-environment recorder produced a 1280x720, 50 fps,
+  4.0 s H.264 MP4. Visual inspection confirms an initial upright recovery,
+  followed by a later side fall; it is not a durable stand.
+- An assisted standing-start battery over 64 worlds produced 64/64 takeoffs,
+  63/64 >=300 degrees, 46/64 >=340 degrees, 27/64 landing latches, 45/64 first
+  ground contacts on feet, and 0/64 strict holds. Environment 29 was rendered:
+  it visibly takes off and rotates, then lands on the side/body.
+- Recovery video:
+  `results/videos/v26-model50-best-recovery/backflip-model_50-recovery-step-0.mp4`.
+- Assisted full-attempt video:
+  `results/videos/v26-model50-assisted-standing/backflip-model_50-standing-step-0.mp4`.
+- These videos are diagnostic evidence only. Neither proves an autonomous
+  standing-start backflip.
+
+## Logging protocol for subsequent entries
+
+For each new checkpoint or variant, append:
+
+1. timestamp, run directory, checkpoint and source/diff identity;
+2. one falsifiable hypothesis and the exact code/config delta;
+3. exact training/evaluation commands, seeds, episode counts, and start mode;
+4. takeoff, >=300, >=340, first-contact-feet, landing-latch, strict stable,
+   body-contact, nonfinite, rotation and timing evidence;
+5. trace/video paths when visual or mechanical diagnosis is used;
+6. whether the hypothesis was supported, rejected, or remains uncertain;
+7. the next decision and why CPU time is justified.
+
+Training reward is diagnostic only. No run is promoted without strict
+standing-start evaluator evidence, and no simulation result is promoted to a
+physical-robot claim.

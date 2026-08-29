@@ -71,6 +71,7 @@ instead of locally (see [scripts/hf/README.md](scripts/hf/README.md)).
 | `Mjlab-GroundPick-{Flat,Rough}-MicroDuck` | flat/rough | Crouch and touch the ground with the mouth tip, return to stand |
 | `Mjlab-BallKick-Flat-MicroDuck` | flat | Kick a 70 mm / 15 g ball forward (actor is ball-blind) |
 | `Mjlab-Roulade-Flat-MicroDuck` | flat | Forward roll over the head, land back on the feet |
+| `Mjlab-Backflip-Flat-MicroDuck` | flat | Standing jump, one airborne backward revolution, feet-first stable landing |
 | `Mjlab-Velocity-Flat-MicroDuck-Rollers` | flat | Roller-skate velocity tracking (passive wheels under the feet) |
 | `Mjlab-Velocity-Swizzle-MicroDuck` | flat | Classic symmetric swizzle skating |
 | `Mjlab-RollerCrouch-Flat-MicroDuck` | flat | Crouch while gliding on rollers |
@@ -177,8 +178,20 @@ this repo).
 ## Tests
 
 ```bash
-uv run --with pytest pytest tests/
+uv run --with pytest python -m pytest tests/
 ```
+
+## Backflip training and evaluation
+
+The backflip has a stricter physical definition than the roulade: rotation is
+credited only after takeoff and during one uninterrupted airborne phase; the
+first ground recontact freezes progress. See
+[`docs/backflip.md`](docs/backflip.md) for the training command, standing-only
+evaluation battery, acceptance thresholds, export rehearsal, and the hardware
+safety gate. The append-oriented
+[`docs/backflip_experiment_log.md`](docs/backflip_experiment_log.md) records
+every experiment's hypothesis, exact command, checkpoint evidence, failure
+reason, and next decision.
 
 CPU-only config-invariant and reward-function regression tests — they lock in
 joint-index mappings, reward sign conventions, and NaN guards.
