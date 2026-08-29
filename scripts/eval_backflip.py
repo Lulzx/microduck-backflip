@@ -81,11 +81,12 @@ def evaluate(
     assist_torque_nm: float | None = None,
     assist_start_s: float | None = None,
     assist_end_s: float | None = None,
+    task_id: str = TASK_ID,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    env_cfg = load_env_cfg(TASK_ID, play=True)
-    agent_cfg = load_rl_cfg(TASK_ID)
+    env_cfg = load_env_cfg(task_id, play=True)
+    agent_cfg = load_rl_cfg(task_id)
     env_cfg.scene.num_envs = num_envs
     env_cfg.seed = seed
     if render_env_index < 0 or render_env_index >= num_envs:
@@ -144,9 +145,9 @@ def evaluate(
             environment_index=render_env_index,
         )
     env = RslRlVecEnvWrapper(rollout_env, clip_actions=agent_cfg.clip_actions)
-    runner_cls = load_runner_cls(TASK_ID)
+    runner_cls = load_runner_cls(task_id)
     if runner_cls is None:
-        raise RuntimeError(f"No runner registered for {TASK_ID}")
+        raise RuntimeError(f"No runner registered for {task_id}")
     runner = runner_cls(env, asdict(agent_cfg), device=device)
     runner.load(
         str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
@@ -424,7 +425,7 @@ def evaluate(
         )
 
     result = {
-        "task": TASK_ID,
+        "task": task_id,
         "checkpoint": str(checkpoint.resolve()),
         "device": device,
         "seed": seed,
@@ -535,6 +536,7 @@ def evaluate(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint", type=Path)
+    parser.add_argument("--task-id", default=TASK_ID)
     parser.add_argument("--num-envs", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=Path)
@@ -580,6 +582,7 @@ def main() -> None:
         args.assist_torque_nm,
         args.assist_start_s,
         args.assist_end_s,
+        args.task_id,
     )
 
 

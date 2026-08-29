@@ -9,6 +9,12 @@ from mjlab_microduck.tasks.backflip_actions import (
 from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     MicroduckBackflipRlCfg,
     make_microduck_backflip_env_cfg,
+    make_microduck_backflip_recovery_env_cfg,
+    make_microduck_backflip_pedestal_env_cfg,
+)
+from mjlab_microduck.tasks.backflip_pedestal_terrain import (
+    PEDESTAL_HEIGHT,
+    PEDESTAL_WIDTH,
 )
 from mjlab_microduck.tasks.microduck_roulade_env_cfg import (
     make_microduck_roulade_env_cfg,
@@ -99,6 +105,44 @@ def test_strict_eval_disables_every_reverse_curriculum_start():
     assert reset["crouch_prob"] == 0.0
     assert reset["midflight_prob"] == 0.0
     assert reset["recovery_prob"] == 0.0
+
+
+def test_recovery_specialist_uses_easy_to_full_reference_state_curriculum():
+    cfg = make_microduck_backflip_recovery_env_cfg()
+    reset = cfg.events["set_backflip_state"].params
+    assert reset["standing_prob"] == 0.0
+    assert reset["crouch_prob"] == 0.0
+    assert reset["midflight_prob"] == 0.0
+    assert reset["recovery_prob"] == 1.0
+    assert reset["initial_assist_scale"] == 0.0
+    assert "backflip_spawn_mix" not in cfg.curriculum
+    assert "backflip_body_only_contact" in cfg.terminations
+
+    stages = cfg.curriculum["backflip_recovery_difficulty"].params["param_stages"]
+    assert stages[0]["params"]["recovery_tilt_max"] < stages[-1]["params"][
+        "recovery_tilt_max"
+    ]
+    assert stages[0]["params"]["recovery_ang_vel_max"] < stages[-1]["params"][
+        "recovery_ang_vel_max"
+    ]
+    assert stages[-1]["params"]["recovery_ang_vel_max"] == 1.5
+
+
+def test_pedestal_curriculum_starts_on_cube_and_requires_lower_floor_clearance():
+    cfg = make_microduck_backflip_pedestal_env_cfg()
+    reset = cfg.events["set_backflip_state"].params
+    assert cfg.scene.terrain.terrain_type == "generator"
+    assert reset["standing_prob"] > 0.0
+    assert reset["midflight_prob"] > 0.0
+    assert reset["recovery_prob"] > 0.0
+    assert reset["standing_z_range"][0] >= PEDESTAL_HEIGHT + 0.11
+    assert reset["crouch_z_range"][0] >= PEDESTAL_HEIGHT + 0.06
+    assert reset["standing_edge_offset"] > 0.0
+    assert reset["floor_reset_distance"] > PEDESTAL_WIDTH / 2.0
+    assert reset["landing_min_horizontal_distance"] > PEDESTAL_WIDTH / 2.0
+    assert cfg.rewards["backflip_takeoff"].params["start_height"] > PEDESTAL_HEIGHT
+    assert "backflip_spawn_mix" in cfg.curriculum
+    assert cfg.events["backflip_assistive_wrench"].params["backward_force_n"] > 0.0
 
 
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():

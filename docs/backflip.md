@@ -33,6 +33,21 @@ data: the former teaches preload-to-launch extension and the latter teaches
 the landing half. They never count as full evaluation episodes;
 `scripts/eval_backflip.py` forces ordinary standing starts.
 
+### Elevated cube curriculum
+
+`Mjlab-Backflip-Pedestal-MicroDuck` starts ordinary trials on a 25 cm collision
+cube above a continuous lower floor. The extra drop increases available flight
+time. A landing counts only after the robot clears the cube by 4 cm, contacts
+the lower floor feet-first after the required rotation, and satisfies the same
+0.5-second stability gate. Mid-flight and recovery lessons spawn beside the
+cube on the lower floor; they cannot intersect or land on the launch surface.
+
+This task deliberately permits a small asymmetric backward translation. Its
+virtual spotter adds a temporary 5 N backward force during discovery. The
+force is annealed with the other assistance, and evaluation can set the entire
+spotter scale to zero. A pedestal result is reported separately and is not
+called a flat-ground backflip.
+
 The current discovery task also uses an EFGCL-style virtual spotter: a 16 N
 upward force and 1.40 Nm backward-pitch torque from 0.30 to 0.40 seconds. Its
 scale drops only after a 60% strict landing rate over an evaluation window.
@@ -116,6 +131,16 @@ uv run python scripts/eval_backflip.py \
   logs/rsl_rl/microduck_backflip/<run>/model_5000.pt \
   --num-envs 128 --seed 42 \
   --output results/backflip_eval_seed42.json
+```
+
+For the cube curriculum, select the task explicitly:
+
+```bash
+uv run python scripts/eval_backflip.py \
+  logs/rsl_rl/microduck_backflip_pedestal/<run>/model_450.pt \
+  --task-id Mjlab-Backflip-Pedestal-MicroDuck \
+  --num-envs 128 --seed 42 --start-mode standing --assist-scale 0 \
+  --output results/pedestal_eval_seed42.json
 ```
 
 Before export, require three 128-episode batteries with seeds 42, 123, and 2026:

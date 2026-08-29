@@ -69,7 +69,11 @@ from .microduck_roulade_env_cfg import (
 )
 from .microduck_backflip_env_cfg import (
     make_microduck_backflip_env_cfg,
+    make_microduck_backflip_recovery_env_cfg,
+    make_microduck_backflip_pedestal_env_cfg,
     MicroduckBackflipRlCfg,
+    MicroduckBackflipRecoveryRlCfg,
+    MicroduckBackflipPedestalRlCfg,
 )
 from .backlash import make_backlash_variant
 
@@ -79,6 +83,24 @@ register_mjlab_task(
     env_cfg=make_microduck_velocity_env_cfg(),
     play_env_cfg=make_microduck_velocity_env_cfg(play=True),
     rl_cfg=MicroduckRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Landing specialist — identical actor contract, 100% post-touchdown RSI.
+register_mjlab_task(
+    task_id="Mjlab-BackflipRecovery-Flat-MicroDuck",
+    env_cfg=make_microduck_backflip_recovery_env_cfg(),
+    play_env_cfg=make_microduck_backflip_recovery_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipRecoveryRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Elevated curriculum — launch from a cube, land on the lower floor.
+register_mjlab_task(
+    task_id="Mjlab-Backflip-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_pedestal_env_cfg(),
+    play_env_cfg=make_microduck_backflip_pedestal_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipPedestalRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

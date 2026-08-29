@@ -7613,6 +7613,7 @@ def apply_backflip_assistive_wrench(
     start_time_s: float = 0.30,
     end_time_s: float = 0.40,
     upward_force_n: float = 16.0,
+    backward_force_n: float = 0.0,
     backward_pitch_torque_nm: float = 1.40,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=("trunk_base",)),
 ) -> torch.Tensor:
@@ -7640,6 +7641,12 @@ def apply_backflip_assistive_wrench(
     dtype = asset.data.root_link_quat_w.dtype
     force = torch.zeros((env.num_envs, 3), device=env.device, dtype=dtype)
     force[:, 2] = amplitude.to(dtype) * float(upward_force_n)
+    if backward_force_n:
+        body_force = torch.zeros_like(force)
+        body_force[:, 0] = -amplitude.to(dtype) * float(backward_force_n)
+        # Translation follows the robot's backward axis, including randomized
+        # spawn yaw, while the lift component remains vertical in world space.
+        force += quat_apply(asset.data.root_link_quat_w, body_force)
     body_torque = torch.zeros_like(force)
     body_torque[:, 1] = (
         amplitude.to(dtype) * _BACKFLIP_SIGN * float(backward_pitch_torque_nm)
@@ -7707,6 +7714,14 @@ def _update_backflip_state(env: ManagerBasedRlEnv, asset: Entity) -> None:
     # A landing only counts on the feet, close to upright, after at least 300
     # degrees of genuine airborne backward rotation.  The latch makes success
     # persistent while the robot settles.
+    horizontal_from_origin = torch.linalg.vector_norm(
+        asset.data.root_link_pos_w[:, :2] - env.scene.terrain.env_origins[:, :2],
+        dim=-1,
+    )
+    minimum_landing_distance = float(
+        getattr(env, "_backflip_landing_min_horizontal_distance", 0.0)
+    )
+    cleared_launch_surface = horizontal_from_origin >= minimum_landing_distance
     landed = (
         env._backflip_airborne_latch
         & recontact
@@ -7714,6 +7729,7 @@ def _update_backflip_state(env: ManagerBasedRlEnv, asset: Entity) -> None:
         & (env._backflip_max >= math.radians(320.0))
         & (_backflip_upright(asset) >= math.cos(math.radians(35.0)))
         & (z >= 0.085)
+        & cleared_launch_surface
     )
     env._backflip_landed_latch |= landed
     env._backflip_flight_ended_latch |= recontact
@@ -7787,6 +7803,9 @@ def reset_backflip_state(
     assist_decay_step: float = 0.05,
     assist_success_threshold: float = 0.60,
     assist_evaluation_window: int = 256,
+    landing_min_horizontal_distance: float = 0.0,
+    standing_edge_offset: float = 0.0,
+    floor_reset_distance: float = 0.0,
 ):
     """Reset to standing or to a collision-free point in a backflip.
 
@@ -7801,6 +7820,9 @@ def reset_backflip_state(
     num = len(env_ids)
     asset: Entity = env.scene[asset_cfg.name]
     accum, maximum, paid = _backflip_state(env)
+    env._backflip_landing_min_horizontal_distance = max(
+        float(landing_min_horizontal_distance), 0.0
+    )
 
     total = standing_prob + crouch_prob + midflight_prob + recovery_prob
     sample = torch.rand(num, device=env.device)
@@ -7878,6 +7900,17 @@ def reset_backflip_state(
     )
     env.sim.data.qpos[env_ids, 2] = z
     env.sim.data.qpos[env_ids, 3:7] = quat
+    # Pedestal curricula need two distinct reset surfaces. Standing/crouched
+    # slices begin near the backward edge of the launch cube; landing lessons
+    # begin clear of it on the lower floor. Both offsets rotate with spawn yaw.
+    backward_xy = torch.stack((-torch.cos(yaw), -torch.sin(yaw)), dim=1)
+    on_launch_surface = ~(is_mid | is_recovery)
+    reset_distance = torch.where(
+        on_launch_surface,
+        torch.full_like(yaw, float(standing_edge_offset)),
+        torch.full_like(yaw, float(floor_reset_distance)),
+    )
+    env.sim.data.qpos[env_ids, :2] += backward_xy * reset_distance.unsqueeze(1)
     env.sim.data.qvel[env_ids, :6] = 0.0
     recovery_ids = env_ids[is_recovery]
     if len(recovery_ids) > 0:
@@ -8479,6 +8512,26 @@ def backflip_body_contact_cost(
     if feet is None or robot is None:
         return torch.zeros(env.num_envs, device=env.device)
     return (env._backflip_airborne_latch & robot & ~feet).float()
+
+
+def backflip_body_only_contact(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Terminate a landing-specialist episode after irrecoverable body contact.
+
+    The dedicated recovery stage starts after a valid feet-first touchdown.
+    Once every foot has lost support while another robot body touches the
+    floor, the strict landing has failed and simulating the remaining seconds
+    only teaches a get-up behavior outside this stage's objective.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    _update_backflip_state(env, asset)
+    feet = _sensor_any_contact(env, _BACKFLIP_FEET_SENSOR)
+    robot = _sensor_any_contact(env, _BACKFLIP_ROBOT_SENSOR)
+    if feet is None or robot is None:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    return env._backflip_landed_latch & robot & ~feet
 
 
 def backflip_assisted_action_cost(env: ManagerBasedRlEnv) -> torch.Tensor:

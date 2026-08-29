@@ -126,6 +126,34 @@ def test_feet_first_upright_contact_after_320deg_latches_landing():
     assert env._backflip_landed_latch.item() is True
 
 
+def test_pedestal_contact_does_not_count_until_robot_clears_launch_cube():
+    env, asset = _fake_env()
+    mdp._backflip_state(env)
+    env._backflip_had_support[:] = True
+    env._backflip_airborne_latch[:] = True
+    env._backflip_max[:] = torch.deg2rad(torch.tensor([325.0]))
+    env._backflip_landing_min_horizontal_distance = 0.13
+    _contacts(env, feet=True, robot=True)
+
+    asset.data.root_link_pos_w[0, 0] = 0.12
+    env.common_step_counter = 1
+    mdp._update_backflip_state(env, asset)
+    assert env._backflip_landed_latch.item() is False
+
+    # A separate flight whose *first* recontact is clear of the cube counts.
+    env2, asset2 = _fake_env()
+    mdp._backflip_state(env2)
+    env2._backflip_had_support[:] = True
+    env2._backflip_airborne_latch[:] = True
+    env2._backflip_max[:] = torch.deg2rad(torch.tensor([325.0]))
+    env2._backflip_landing_min_horizontal_distance = 0.13
+    _contacts(env2, feet=True, robot=True)
+    asset2.data.root_link_pos_w[0, 0] = 0.14
+    env2.common_step_counter = 1
+    mdp._update_backflip_state(env2, asset2)
+    assert env2._backflip_landed_latch.item() is True
+
+
 def test_success_requires_continuous_half_second_stable_hold():
     env, asset = _fake_env()
     mdp._backflip_state(env)
@@ -203,6 +231,19 @@ def test_body_only_contact_cannot_latch_landing():
     env.common_step_counter = 1
     mdp._update_backflip_state(env, asset)
     assert env._backflip_landed_latch.item() is False
+
+
+def test_recovery_specialist_terminates_only_after_foot_support_is_lost():
+    env, _ = _fake_env()
+    mdp._backflip_state(env)
+    env._backflip_landed_latch[:] = True
+
+    _contacts(env, feet=True, robot=True)
+    assert mdp.backflip_body_only_contact(env).item() is False
+
+    _contacts(env, feet=False, robot=True)
+    env.common_step_counter = 1
+    assert mdp.backflip_body_only_contact(env).item() is True
 
 
 def test_rotation_frontier_freezes_after_first_ground_recontact():

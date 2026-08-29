@@ -14,11 +14,19 @@ from mjlab.managers import (
     EventTermCfg,
     ObservationTermCfg,
     RewardTermCfg,
+    TerminationTermCfg,
 )
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.velocity import mdp
+from mjlab.terrains import TerrainEntityCfg
+from mjlab.terrains.terrain_generator import TerrainGeneratorCfg
 
 from mjlab_microduck.tasks import mdp as microduck_mdp
+from mjlab_microduck.tasks.backflip_pedestal_terrain import (
+    BackflipPedestalTerrainCfg,
+    PEDESTAL_HEIGHT,
+    PEDESTAL_WIDTH,
+)
 from mjlab_microduck.tasks.backflip_actions import (
     BackflipResidualJointPositionActionCfg,
 )
@@ -414,6 +422,158 @@ def configure_backflip_standing_eval(cfg) -> None:
     cfg.curriculum.pop("backflip_spawn_mix", None)
 
 
+def make_microduck_backflip_recovery_env_cfg(play: bool = False):
+    """Phase-final specialist used before returning to the complete maneuver.
+
+    This implements a reference-state-initialization curriculum: every world
+    begins immediately after a valid feet-first revolution, first near the
+    nominal standing state and then with progressively wider touchdown errors.
+    Network dimensions and strict success semantics are identical to the full
+    task, so its actor can warm-start the subsequent integrated training stage.
+    """
+    cfg = make_microduck_backflip_env_cfg(play=play)
+    reset = cfg.events["set_backflip_state"].params
+    reset.update(
+        {
+            "standing_prob": 0.0,
+            "crouch_prob": 0.0,
+            "midflight_prob": 0.0,
+            "recovery_prob": 1.0,
+            "recovery_z_range": (0.112, 0.118),
+            "recovery_tilt_max": math.radians(4.0),
+            "recovery_lin_vel_max": 0.03,
+            "recovery_ang_vel_max": 0.20,
+            "joint_noise_std": 0.01,
+            "initial_assist_scale": 0.0,
+        }
+    )
+    cfg.curriculum.pop("backflip_spawn_mix", None)
+    cfg.curriculum["backflip_recovery_difficulty"] = CurriculumTermCfg(
+        func=microduck_mdp.event_param_curriculum,
+        params={
+            "event_name": "set_backflip_state",
+            "param_stages": [
+                {
+                    "step": 0,
+                    "params": {
+                        "recovery_z_range": (0.112, 0.118),
+                        "recovery_tilt_max": math.radians(4.0),
+                        "recovery_lin_vel_max": 0.03,
+                        "recovery_ang_vel_max": 0.20,
+                        "joint_noise_std": 0.01,
+                    },
+                },
+                {
+                    "step": 100 * 24,
+                    "params": {
+                        "recovery_z_range": (0.108, 0.12),
+                        "recovery_tilt_max": math.radians(8.0),
+                        "recovery_lin_vel_max": 0.08,
+                        "recovery_ang_vel_max": 0.60,
+                        "joint_noise_std": 0.03,
+                    },
+                },
+                {
+                    "step": 250 * 24,
+                    "params": {
+                        "recovery_z_range": (0.105, 0.12),
+                        "recovery_tilt_max": math.radians(15.0),
+                        "recovery_lin_vel_max": 0.20,
+                        "recovery_ang_vel_max": 1.50,
+                        "joint_noise_std": 0.05,
+                    },
+                },
+            ],
+        },
+    )
+    cfg.terminations["backflip_body_only_contact"] = TerminationTermCfg(
+        func=microduck_mdp.backflip_body_only_contact,
+        time_out=False,
+    )
+    return cfg
+
+
+def make_microduck_backflip_pedestal_env_cfg(play: bool = False):
+    """Launch from a 25 cm cube and require landing on the lower floor.
+
+    The elevated start adds about 0.20 s of ballistic fall time without
+    changing actuator limits. It is a curriculum task, not a redefinition of
+    the flat-ground acceptance gate.
+    """
+    cfg = make_microduck_backflip_env_cfg(play=play)
+    cfg.scene.terrain = TerrainEntityCfg(
+        terrain_type="generator",
+        terrain_generator=TerrainGeneratorCfg(
+            seed=42,
+            size=(2.0, 2.0),
+            curriculum=False,
+            num_rows=1,
+            num_cols=1,
+            color_scheme="none",
+            sub_terrains={"backflip_pedestal": BackflipPedestalTerrainCfg()},
+        ),
+        max_init_terrain_level=0,
+    )
+
+    reset = cfg.events["set_backflip_state"].params
+    reset.update(
+        {
+            "standing_prob": 0.35,
+            "crouch_prob": 0.10,
+            "midflight_prob": 0.35,
+            "recovery_prob": 0.20,
+            "standing_z_range": (
+                PEDESTAL_HEIGHT + 0.11,
+                PEDESTAL_HEIGHT + 0.12,
+            ),
+            "crouch_z_range": (
+                PEDESTAL_HEIGHT + 0.06,
+                PEDESTAL_HEIGHT + 0.085,
+            ),
+            "standing_edge_offset": 0.035,
+            "floor_reset_distance": PEDESTAL_WIDTH / 2.0 + 0.25,
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+        }
+    )
+    cfg.curriculum["backflip_spawn_mix"].params["param_stages"] = [
+        {
+            "step": 0,
+            "params": {
+                "standing_prob": 0.35,
+                "crouch_prob": 0.10,
+                "midflight_prob": 0.35,
+                "recovery_prob": 0.20,
+            },
+        },
+        {
+            "step": 200 * 24,
+            "params": {
+                "standing_prob": 0.55,
+                "crouch_prob": 0.10,
+                "midflight_prob": 0.25,
+                "recovery_prob": 0.10,
+            },
+        },
+        {
+            "step": 400 * 24,
+            "params": {
+                "standing_prob": 0.75,
+                "crouch_prob": 0.10,
+                "midflight_prob": 0.10,
+                "recovery_prob": 0.05,
+            },
+        },
+    ]
+    cfg.events["backflip_assistive_wrench"].params["backward_force_n"] = 5.0
+    cfg.rewards["backflip_takeoff"].params.update(
+        {
+            "start_height": PEDESTAL_HEIGHT + STAND_Z,
+            "target_height": PEDESTAL_HEIGHT + 0.30,
+        }
+    )
+    return cfg
+
+
 MicroduckBackflipRlCfg = deepcopy(MicroduckRouladeRlCfg)
 MicroduckBackflipRlCfg.experiment_name = "microduck_backflip"
 MicroduckBackflipRlCfg.run_name = "microduck_backflip"
@@ -422,3 +582,11 @@ MicroduckBackflipRlCfg.max_iterations = 5_000
 # outputs.  That is counterproductive here: asymmetric leg/arm timing is now a
 # valid way to create takeoff torque and a mild axial correction in flight.
 MicroduckBackflipRlCfg.algorithm.symmetry_cfg = None
+
+MicroduckBackflipRecoveryRlCfg = deepcopy(MicroduckBackflipRlCfg)
+MicroduckBackflipRecoveryRlCfg.experiment_name = "microduck_backflip_recovery"
+MicroduckBackflipRecoveryRlCfg.run_name = "microduck_backflip_recovery"
+
+MicroduckBackflipPedestalRlCfg = deepcopy(MicroduckBackflipRlCfg)
+MicroduckBackflipPedestalRlCfg.experiment_name = "microduck_backflip_pedestal"
+MicroduckBackflipPedestalRlCfg.run_name = "microduck_backflip_pedestal"

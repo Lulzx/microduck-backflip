@@ -221,6 +221,70 @@ observations, reward, or success semantics.
 - Evidence: `results/research_efgcl_v26_model175_recovery_seed42.json` (local,
   not in the curated public evidence set).
 
+## v27 elevated cube curriculum
+
+**2026-08-29 17:38-17:47 IST — task construction and pre-training baseline.**
+
+Hypothesis: a 0.25 m elevated launch cube supplies additional gravitational
+flight time without asking the XL330 actuators for more vertical impulse. A
+small asymmetric backward translation is permitted. Success still requires a
+genuine airborne backward revolution, first lower-floor recontact on the feet,
+clearance beyond the cube edge, and the unchanged continuous 0.5 s strict hold.
+This is a curriculum milestone; it does not replace the eventual flat-ground
+acceptance gate.
+
+Implementation and falsification details:
+
+- Added a real MuJoCo collision floor plus a literal 0.25 x 0.25 x 0.25 m
+  cube in `backflip_pedestal_terrain.py` and registered
+  `Mjlab-Backflip-Pedestal-MicroDuck`.
+- The first 0.18 m prototype was too narrow: visual replay showed the nominal
+  feet on its edges, making an accidental fall dominate before the launch.
+  It was rejected before training.
+- Standing/crouch slices now reset near the cube's backward edge. Mid-flight
+  and recovery slices reset 0.375 m from its center on the lower floor, so no
+  landing lesson begins intersecting the cube.
+- The EFGCL spotter gains a temporary 5 N body-relative backward component in
+  this task only, alongside the existing 16 N lift and 1.40 Nm pitch torque.
+  Assistance remains success-annealed; strict evaluation still uses zero.
+- Landing latching requires horizontal root distance greater than the 0.125 m
+  cube half-width plus 0.04 m margin. Touching down on the cube never counts.
+- Focused configuration/state-machine tests: 34 passed. A 16-world,
+  one-iteration live simulator smoke run completed without NaN at
+  `logs/rsl_rl/microduck_backflip_pedestal/2026-08-29_17-38-22_pedestal-smoke-16`.
+
+Warm-start baseline using v26 model 50, 64 standing starts, seed 42, full
+assistance:
+
+- Takeoff 64/64; >=300 degrees 5/64; >=340 degrees 5/64; >=360 degrees 4/64.
+- Valid upright feet-first lower-floor landing latch: **3/64 (4.6875%)**.
+- Strict 0.5 s stable landing: 0/64; body-only contact: 63/64.
+- Maximum rotation 438.91 degrees; maximum peak height 0.5211 m.
+- This is the first cube-start result and supplies a nonzero landing signal,
+  but it is not success.
+- Evidence: `results/research_pedestal_v3_model50_assisted_seed42.json`.
+
+Training command (the checkpoint was copied byte-identically into the target
+experiment directory because the runner does not resolve cross-experiment
+resume paths; SHA-256 `b74c9ec557cb60a60e494102b7a69b20d7de10bc0f378065442dd2a3e3febac7`):
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/microduck-train \
+  Mjlab-Backflip-Pedestal-MicroDuck --gpu-ids None \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 400 --agent.save-interval 50 \
+  --agent.run-name pedestal-v1-model50-warmstart-256 \
+  --agent.logger tensorboard --agent.resume True \
+  --agent.load-run warmstart-v26-model50 \
+  --agent.load-checkpoint model_50.pt
+```
+
+Run directory:
+`logs/rsl_rl/microduck_backflip_pedestal/2026-08-29_17-46-31_pedestal-v1-model50-warmstart-256`.
+The resumed counter begins at iteration 51 and is scheduled through 450.
+Checkpoint promotion will use the strict standing-only evaluator, not mean PPO
+reward.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

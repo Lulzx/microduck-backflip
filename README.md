@@ -72,6 +72,7 @@ instead of locally (see [scripts/hf/README.md](scripts/hf/README.md)).
 | `Mjlab-BallKick-Flat-MicroDuck` | flat | Kick a 70 mm / 15 g ball forward (actor is ball-blind) |
 | `Mjlab-Roulade-Flat-MicroDuck` | flat | Forward roll over the head, land back on the feet |
 | `Mjlab-Backflip-Flat-MicroDuck` | flat | Standing jump, one airborne backward revolution, feet-first stable landing |
+| `Mjlab-Backflip-Pedestal-MicroDuck` | 25 cm cube + lower floor | Elevated-launch curriculum; clear the cube, backflip, then hold a strict feet-first landing |
 | `Mjlab-Velocity-Flat-MicroDuck-Rollers` | flat | Roller-skate velocity tracking (passive wheels under the feet) |
 | `Mjlab-Velocity-Swizzle-MicroDuck` | flat | Classic symmetric swizzle skating |
 | `Mjlab-RollerCrouch-Flat-MicroDuck` | flat | Crouch while gliding on rollers |
