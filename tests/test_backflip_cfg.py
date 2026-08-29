@@ -1,6 +1,8 @@
 """Configuration invariants for the airborne MicroDuck backflip task."""
 
+import json
 import math
+from pathlib import Path
 
 from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.backflip_actions import (
@@ -13,6 +15,7 @@ from mjlab_microduck.tasks.microduck_backflip_env_cfg import (
     make_microduck_backflip_touchdown_env_cfg,
     make_microduck_backflip_pedestal_env_cfg,
     make_microduck_backflip_pedestal_braking_env_cfg,
+    make_microduck_backflip_reference_env_cfg,
 )
 from mjlab_microduck.tasks.backflip_pedestal_terrain import (
     PEDESTAL_HEIGHT,
@@ -195,6 +198,19 @@ def test_pedestal_braking_finetune_releases_late_flight_authority():
         cfg.terminations["backflip_body_only_contact"].func
         is microduck_mdp.backflip_postflight_body_only_contact
     )
+
+
+def test_reference_task_uses_captured_full_launch_states():
+    cfg = make_microduck_backflip_reference_env_cfg()
+    reset = cfg.events["set_backflip_state"]
+    assert reset.func is microduck_mdp.reset_backflip_reference_state
+    reference_path = Path(reset.params["reference_state_path"])
+    payload = json.loads(reference_path.read_text())
+    assert payload["schema_version"] == 1
+    assert len(payload["snapshots"]) >= 32
+    assert {len(row["qpos_local"]) for row in payload["snapshots"]} == {21}
+    assert {len(row["qvel"]) for row in payload["snapshots"]} == {20}
+    assert "backflip_spawn_mix" not in cfg.curriculum
 
 
 def test_rotation_credit_is_a_full_revolution_and_is_rate_limited():

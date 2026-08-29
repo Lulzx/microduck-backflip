@@ -1,0 +1,299 @@
+{
+  "task": "Mjlab-BackflipBrake-Pedestal-MicroDuck",
+  "checkpoint": "/Users/lulzx/work/microduck-backflip/microduck_rl/logs/rsl_rl/microduck_backflip_pedestal_braking/2026-08-29_19-12-36_integrated-late-braking-v1-256/model_225.pt",
+  "recovery_checkpoint": null,
+  "post_landing_checkpoint": null,
+  "device": "cpu",
+  "seed": 42,
+  "episodes": 64,
+  "start_mode": "standing",
+  "recovery_profile": null,
+  "recovery_switch_mode": "landing",
+  "recovery_approach_gate": {
+    "angle_deg": 330.0,
+    "tilt_deg": 40.0,
+    "height_m": 0.36,
+    "descending": true
+  },
+  "standing_start_only": true,
+  "assist_scale": 0.0,
+  "assist_wrench": {
+    "upward_force_n": 16.0,
+    "backward_pitch_torque_nm": 1.4,
+    "start_time_s": 0.3,
+    "end_time_s": 0.4
+  },
+  "stable_hold_s": 0.5,
+  "landed_environment_indices": [],
+  "stable_environment_indices": [],
+  "rates": {
+    "takeoff": 1.0,
+    "airborne_rotation_ge_300deg": 0.0,
+    "airborne_rotation_ge_340deg": 0.0,
+    "airborne_rotation_ge_360deg": 0.0,
+    "feet_first_landing": 0.0,
+    "stable_landing": 0.0,
+    "body_only_ground_contact": 0.796875,
+    "first_ground_contact_was_feet": 1.0,
+    "nonfinite_state": 0.0,
+    "recovery_policy_activated": 0.0,
+    "post_landing_policy_activated": 0.0,
+    "ever_landing_feet": 0.0,
+    "ever_landing_upright": 0.0,
+    "ever_landing_height": 0.0,
+    "ever_landing_low_angular_speed": 0.0
+  },
+  "longest_posture_hold_s": {
+    "min": 0.0,
+    "mean": 0.0,
+    "p10": 0.0,
+    "p50": 0.0,
+    "p90": 0.0,
+    "max": 0.0
+  },
+  "longest_strict_stable_hold_s": {
+    "min": 0.0,
+    "mean": 0.0,
+    "p10": 0.0,
+    "p50": 0.0,
+    "p90": 0.0,
+    "max": 0.0
+  },
+  "top_rotation_trials": [
+    {
+      "environment_index": 56,
+      "rotation_deg": 44.79561233520508,
+      "peak_height_m": 0.37249067425727844,
+      "takeoff_upward_velocity_m_s": -0.2018955796957016,
+      "takeoff_backward_pitch_rate_rad_s": -0.21520990133285522,
+      "peak_pre_takeoff_upward_velocity_m_s": 0.0,
+      "peak_lateral_axis_tilt_deg": 41.80139923095703,
+      "uninterrupted_flight_s": 0.2199999988079071,
+      "first_ground_contact_was_feet": true
+    },
+    {
+      "environment_index": 25,
+      "rotation_deg": 38.70997619628906,
+      "peak_height_m": 0.3719187080860138,
+      "takeoff_upward_velocity_m_s": -0.1366497278213501,
+      "takeoff_backward_pitch_rate_rad_s": -5.333057403564453,
+      "peak_pre_takeoff_upward_velocity_m_s": 0.11847732961177826,
+      "peak_lateral_axis_tilt_deg": 21.5040340423584,
+      "uninterrupted_flight_s": 0.3199999928474426,
+      "first_ground_contact_was_feet": true
+    },
+    {
+      "environment_index": 33,
+      "rotation_deg": 34.87520217895508,
+      "peak_height_m": 0.3722727298736572,
+      "takeoff_upward_velocity_m_s": -1.0919082164764404,
+      "takeoff_backward_pitch_rate_rad_s": 1.4174442291259766,
+      "peak_pre_takeoff_upward_velocity_m_s": 0.16213558614253998,
+      "peak_lateral_axis_tilt_deg": 51.73966979980469,
+      "uninterrupted_flight_s": 0.0,
+      "first_ground_contact_was_feet": true
+    },
+    {
+      "environment_index": 24,
+      "rotation_deg": 32.70792770385742,
+      "peak_height_m": 0.36921247839927673,
+      "takeoff_upward_velocity_m_s": -0.17806531488895416,
+      "takeoff_backward_pitch_rate_rad_s": 1.70266592502594,
+      "peak_pre_takeoff_upward_velocity_m_s": 0.0,
+      "peak_lateral_axis_tilt_deg": 17.817480087280273,
+      "uninterrupted_flight_s": 0.1599999964237213,
+      "first_ground_contact_was_feet": true
+    },
+    {
+      "environment_index": 1,
+      "rotation_deg": 29.42207145690918,
+      "peak_height_m": 0.3691573143005371,
+      "takeoff_upward_velocity_m_s": -0.20836104452610016,
+      "takeoff_backward_pitch_rate_rad_s": 0.5218429565429688,
+      "peak_pre_takeoff_upward_velocity_m_s": 0.0,
+      "peak_lateral_axis_tilt_deg": 17.801151275634766,
+      "uninterrupted_flight_s": 0.2199999988079071,
+      "first_ground_contact_was_feet": true
+    }
+  ],
+  "peak_height_m": {
+    "min": 0.3645279109477997,
+    "mean": 0.369961678981781,
+    "p10": 0.3684839904308319,
+    "p50": 0.3698386549949646,
+    "p90": 0.37219375371932983,
+    "max": 0.37342163920402527
+  },
+  "peak_airborne_rotation_deg": {
+    "min": 0.4717165231704712,
+    "mean": 4.983587741851807,
+    "p10": 0.4981710612773895,
+    "p50": 0.5576564073562622,
+    "p90": 17.93053436279297,
+    "max": 44.79561233520508
+  },
+  "peak_angular_speed_rad_s": {
+    "min": 6.859581470489502,
+    "mean": 13.5347900390625,
+    "p10": 11.719793319702148,
+    "p50": 12.930807113647461,
+    "p90": 16.333345413208008,
+    "max": 22.342443466186523
+  },
+  "peak_backward_pitch_rate_rad_s": {
+    "min": 1.840380311012268,
+    "mean": 5.3729987144470215,
+    "p10": 3.226306200027466,
+    "p50": 3.7827506065368652,
+    "p90": 9.812158584594727,
+    "max": 16.842382431030273
+  },
+  "peak_body_roll_rate_rad_s": {
+    "min": 1.5130269527435303,
+    "mean": 4.439168453216553,
+    "p10": 3.9459054470062256,
+    "p50": 4.317455291748047,
+    "p90": 4.692636489868164,
+    "max": 10.177360534667969
+  },
+  "peak_axial_yaw_rate_rad_s": {
+    "min": 5.421038627624512,
+    "mean": 6.777027130126953,
+    "p10": 6.078405857086182,
+    "p50": 6.552455902099609,
+    "p90": 7.745276927947998,
+    "max": 9.652161598205566
+  },
+  "peak_out_of_plane_rate_rad_s": {
+    "min": 5.487173080444336,
+    "mean": 6.922214508056641,
+    "p10": 6.085820198059082,
+    "p50": 6.55803108215332,
+    "p90": 7.763774394989014,
+    "max": 13.9188871383667
+  },
+  "peak_lateral_axis_tilt_deg": {
+    "min": 3.500669479370117,
+    "mean": 14.515769958496094,
+    "p10": 10.708406448364258,
+    "p50": 12.585580825805664,
+    "p90": 17.20549201965332,
+    "max": 65.82417297363281
+  },
+  "backward_pitch_rate_at_takeoff_rad_s": {
+    "min": -5.333057403564453,
+    "mean": 0.19153054058551788,
+    "p10": -0.22901049256324768,
+    "p50": 0.5333983898162842,
+    "p90": 0.6156302094459534,
+    "max": 1.70266592502594
+  },
+  "upward_velocity_at_takeoff_m_s": {
+    "min": -1.0919082164764404,
+    "mean": -0.2118024379014969,
+    "p10": -0.21013274788856506,
+    "p50": -0.2079971432685852,
+    "p90": -0.18975886702537537,
+    "max": -0.04275750368833542
+  },
+  "peak_upward_velocity_m_s": {
+    "min": 0.22507023811340332,
+    "mean": 0.35823267698287964,
+    "p10": 0.3006654381752014,
+    "p50": 0.35199955105781555,
+    "p90": 0.43833109736442566,
+    "max": 0.45898887515068054
+  },
+  "peak_pre_takeoff_upward_velocity_m_s": {
+    "min": 0.0,
+    "mean": 0.014213760383427143,
+    "p10": 0.0,
+    "p50": 0.0,
+    "p90": 0.010134788230061531,
+    "max": 0.16556763648986816
+  },
+  "peak_pre_takeoff_backward_pitch_rate_rad_s": {
+    "min": 0.0,
+    "mean": 0.5122820138931274,
+    "p10": 0.0,
+    "p50": 0.542364239692688,
+    "p90": 0.6156302094459534,
+    "max": 1.70266592502594
+  },
+  "peak_pre_takeoff_coupled_quality": {
+    "min": 0.0,
+    "mean": 0.0020980932749807835,
+    "p10": 0.0,
+    "p50": 0.0,
+    "p90": 0.0,
+    "max": 0.061187744140625
+  },
+  "rotation_at_first_ground_contact_deg": {
+    "min": 0.0,
+    "mean": 1.380481481552124,
+    "p10": 0.4498727023601532,
+    "p50": 0.49975937604904175,
+    "p90": 0.5804010033607483,
+    "max": 32.70792770385742
+  },
+  "timing_s": {
+    "takeoff": {
+      "min": 0.019999999552965164,
+      "mean": 0.03343749791383743,
+      "p10": 0.019999999552965164,
+      "p50": 0.019999999552965164,
+      "p90": 0.07999999821186066,
+      "max": 0.36000001430511475
+    },
+    "first_ground_contact": {
+      "min": 0.03999999910593033,
+      "mean": 0.2371874898672104,
+      "p10": 0.17000001668930054,
+      "p50": 0.23999999463558197,
+      "p90": 0.25999999046325684,
+      "max": 0.46000000834465027
+    },
+    "uninterrupted_flight": {
+      "min": 0.0,
+      "mean": 0.20375001430511475,
+      "p10": 0.09999999403953552,
+      "p50": 0.2199999988079071,
+      "p90": 0.23999999463558197,
+      "max": 0.36000001430511475
+    },
+    "body_only_ground_contact": {
+      "min": 0.3400000035762787,
+      "mean": 1.7972549200057983,
+      "p10": 0.5600000023841858,
+      "p50": 1.5399999618530273,
+      "p90": 3.5399999618530273,
+      "max": 3.9800000190734863
+    },
+    "airborne_until_body_contact": {
+      "min": 0.24000000953674316,
+      "mean": 1.761960744857788,
+      "p10": 0.5400000214576721,
+      "p50": 1.5199999809265137,
+      "p90": 3.5199999809265137,
+      "max": 3.9600000381469727
+    },
+    "rotation_300deg": {
+      "mean": null,
+      "p10": null,
+      "p50": null,
+      "p90": null
+    },
+    "feet_first_landing": {
+      "mean": null,
+      "p10": null,
+      "p50": null,
+      "p90": null
+    },
+    "stable_landing": {
+      "mean": null,
+      "p10": null,
+      "p50": null,
+      "p90": null
+    }
+  }
+}

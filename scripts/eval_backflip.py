@@ -107,6 +107,8 @@ def evaluate(
     recovery_approach_angle_deg: float = 330.0,
     recovery_approach_tilt_deg: float = 40.0,
     recovery_approach_height_m: float = 0.36,
+    snapshot_output: Path | None = None,
+    snapshot_angle_deg: float = 260.0,
 ) -> dict:
     configure_torch_backends()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -119,7 +121,8 @@ def evaluate(
 
     # The acceptance battery is standing-start only.  Reverse-curriculum
     # mid-flight states are valuable training data but are not full backflips.
-    configure_backflip_standing_eval(env_cfg)
+    if start_mode != "task":
+        configure_backflip_standing_eval(env_cfg)
     if assist_scale < 0.0 or assist_scale > 1.0:
         raise ValueError("assist_scale must be in [0, 1]")
     if not 0.0 <= recovery_approach_angle_deg <= 360.0:
@@ -128,7 +131,12 @@ def evaluate(
         raise ValueError("recovery_approach_tilt_deg must be in [0, 180]")
     if recovery_approach_height_m <= 0.0:
         raise ValueError("recovery_approach_height_m must be positive")
-    env_cfg.events["set_backflip_state"].params["initial_assist_scale"] = assist_scale
+    if not 0.0 <= snapshot_angle_deg <= 360.0:
+        raise ValueError("snapshot_angle_deg must be in [0, 360]")
+    if start_mode != "task":
+        env_cfg.events["set_backflip_state"].params["initial_assist_scale"] = (
+            assist_scale
+        )
     assist_cfg = env_cfg.events["backflip_assistive_wrench"].params
     if assist_force_n is not None:
         assist_cfg["upward_force_n"] = assist_force_n
@@ -150,7 +158,7 @@ def evaluate(
         reset = env_cfg.events["set_backflip_state"].params
         reset["standing_prob"] = 0.0
         reset["recovery_prob"] = 1.0
-    elif start_mode != "standing":
+    elif start_mode not in ("standing", "task"):
         raise ValueError(f"Unsupported start mode: {start_mode}")
     if recovery_profile is not None:
         if start_mode != "recovery":
@@ -298,6 +306,8 @@ def evaluate(
     stable_time = torch.full_like(takeoff_time, float("nan"))
     trace_steps: list[dict] = []
     trace_idx = render_env_index
+    snapshot_taken = torch.zeros_like(launched)
+    snapshots: list[dict] = []
 
     with torch.inference_mode():
         for step in range(base_env.max_episode_length):
@@ -327,6 +337,43 @@ def evaluate(
             now = (step + 1) * base_env.step_dt
             launched_now = base_env._backflip_airborne_latch
             landed_now = base_env._backflip_landed_latch
+            if snapshot_output is not None:
+                snapshot_now = (
+                    launched_now
+                    & ~base_env._backflip_flight_ended_latch
+                    & ~snapshot_taken
+                    & (
+                        base_env._backflip_max
+                        >= math.radians(snapshot_angle_deg)
+                    )
+                )
+                snapshot_ids = torch.nonzero(snapshot_now, as_tuple=False).flatten()
+                if snapshot_ids.numel() > 0:
+                    qpos = base_env.sim.data.qpos[snapshot_ids].detach().clone()
+                    qvel = base_env.sim.data.qvel[snapshot_ids].detach().clone()
+                    origins = base_env.scene.terrain.env_origins[snapshot_ids]
+                    qpos[:, :3] -= origins
+                    for row, env_idx in enumerate(snapshot_ids.tolist()):
+                        snapshots.append(
+                            {
+                                "source_environment_index": env_idx,
+                                "time_s": float(
+                                    base_env.episode_length_buf[env_idx].item()
+                                    * base_env.step_dt
+                                ),
+                                "rotation_rad": float(
+                                    base_env._backflip_max[env_idx].item()
+                                ),
+                                "qpos_local": [
+                                    float(x) for x in qpos[row].tolist()
+                                ],
+                                "qvel": [float(x) for x in qvel[row].tolist()],
+                                "previous_action": [
+                                    float(x) for x in actions[env_idx].tolist()
+                                ],
+                            }
+                        )
+                    snapshot_taken |= snapshot_now
             # The launch actor owns the complete ballistic maneuver. Switch
             # only after the state machine validates a rotated, upright,
             # feet-first contact clear of the launch surface.
@@ -722,6 +769,22 @@ def evaluate(
         }
         trace_output.write_text(json.dumps(trace, indent=2) + "\n")
         print(f"Wrote {trace_output}")
+    if snapshot_output is not None:
+        snapshot_output.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_payload = {
+            "schema_version": 1,
+            "checkpoint": str(checkpoint.resolve()),
+            "task": task_id,
+            "seed": seed,
+            "assist_scale": assist_scale,
+            "episodes": num_envs,
+            "capture_angle_deg": snapshot_angle_deg,
+            "step_dt_s": base_env.step_dt,
+            "qpos_coordinates": "root_xyz_relative_to_terrain_origin",
+            "snapshots": snapshots,
+        }
+        snapshot_output.write_text(json.dumps(snapshot_payload, indent=2) + "\n")
+        print(f"Wrote {snapshot_output} ({len(snapshots)} snapshots)")
     env.close()
     return result
 
@@ -735,7 +798,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--start-mode",
-        choices=("standing", "crouch", "midflight", "recovery"),
+        choices=("standing", "crouch", "midflight", "recovery", "task"),
         default="standing",
     )
     parser.add_argument("--video-dir", type=Path)
@@ -799,6 +862,17 @@ def main() -> None:
         type=Path,
         help="Write per-step kinematics and policy actions for environment zero",
     )
+    parser.add_argument(
+        "--snapshot-output",
+        type=Path,
+        help="Capture every world's first full simulator state past an angle",
+    )
+    parser.add_argument(
+        "--snapshot-angle-deg",
+        type=float,
+        default=260.0,
+        help="Airborne rotation threshold for reference-state capture",
+    )
     args = parser.parse_args()
     evaluate(
         args.checkpoint,
@@ -822,6 +896,8 @@ def main() -> None:
         args.recovery_approach_angle_deg,
         args.recovery_approach_tilt_deg,
         args.recovery_approach_height_m,
+        args.snapshot_output,
+        args.snapshot_angle_deg,
     )
 
 

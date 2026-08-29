@@ -73,11 +73,13 @@ from .microduck_backflip_env_cfg import (
     make_microduck_backflip_touchdown_env_cfg,
     make_microduck_backflip_pedestal_env_cfg,
     make_microduck_backflip_pedestal_braking_env_cfg,
+    make_microduck_backflip_reference_env_cfg,
     MicroduckBackflipRlCfg,
     MicroduckBackflipRecoveryRlCfg,
     MicroduckBackflipTouchdownRlCfg,
     MicroduckBackflipPedestalRlCfg,
     MicroduckBackflipPedestalBrakingRlCfg,
+    MicroduckBackflipReferenceRlCfg,
 )
 from .backlash import make_backlash_variant
 
@@ -123,6 +125,15 @@ register_mjlab_task(
     env_cfg=make_microduck_backflip_pedestal_braking_env_cfg(),
     play_env_cfg=make_microduck_backflip_pedestal_braking_env_cfg(play=True),
     rl_cfg=MicroduckBackflipPedestalBrakingRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Iterative motion-imitation slice from captured real launch-policy states.
+register_mjlab_task(
+    task_id="Mjlab-BackflipReference-Pedestal-MicroDuck",
+    env_cfg=make_microduck_backflip_reference_env_cfg(),
+    play_env_cfg=make_microduck_backflip_reference_env_cfg(play=True),
+    rl_cfg=MicroduckBackflipReferenceRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

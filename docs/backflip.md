@@ -90,6 +90,16 @@ controller.
 The integrated pedestal-braking variant additionally releases full authority
 after 280°; the spotter pulse has already ended by then, so this changes only
 the actor's ability to brake and place its feet before impact.
+
+`Mjlab-BackflipReference-Pedestal-MicroDuck` is the iterative-reference
+landing stage. Its resets sample complete `qpos`/`qvel` states captured when
+the integrated model-225 cube actor crossed 260°, with root position made
+terrain-origin-relative and the actor's phase observation continued from the
+captured 0.56–0.70 s launch time. This preserves the actual joint geometry,
+momentum, and randomized launch distribution while making the same difficult
+approach repeatable. Scores from this task are RSI diagnostics, never complete
+standing-start backflips; learned continuation weights must be returned to the
+full cube task and pass its standing battery.
 Unassisted reverse-curriculum worlds retain full authority regardless of the
 global stage. Assistance can decay only after the same continuous 0.5-second
 stable hold used by the evaluator; a one-frame feet touch is not curriculum

@@ -580,6 +580,49 @@ WARP_NUM_THREADS=12 .venv/bin/microduck-train \
   --agent.load-checkpoint model_200.pt
 ```
 
+**2026-08-29 19:12-19:28 IST — v33 plateau and v34 actual-trajectory RSI.**
+
+- Integrated run directory:
+  `logs/rsl_rl/microduck_backflip_pedestal_braking/2026-08-29_19-12-36_integrated-late-braking-v1-256`.
+  It was stopped after model 275 because three strict checkpoint batteries
+  showed the same zero-braking failure. Assisted model 225 was best: 16/64
+  reached 300°, 9/64 latched a valid feet-first landing, and every first
+  contact was on a foot. Model 250 fell to 5/64 latches and model 275 recovered
+  only to 8/64. All three had 0/64 ever reach <2 rad/s, 0 strict holds, and at
+  most 0.02 s posture hold. Unassisted model 225 and 250 reached only 44.80°
+  and 55.02° maximum respectively. The run improved approach frequency but
+  did not learn launch autonomy or impact braking; continuing the same MDP was
+  rejected.
+- Added evaluator state capture at an airborne-rotation threshold. A 256-world
+  assisted model-225 battery captured 46 first-crossing records at 260–283°.
+  Every record contains 21-position `qpos`, 20-velocity `qvel`, previous
+  14-D action, rotation, and local phase time. Root XYZ is stored relative to
+  each terrain origin. Captured phases are 0.56–0.70 s; this corrects an early
+  draft that accidentally stored global evaluation time after world resets.
+- Added `Mjlab-BackflipReference-Pedestal-MicroDuck`. Its reset samples those
+  exact full simulator states and offsets the phase observation to the
+  captured launch time. It seeds rotation potentials and airborne latches but
+  not landing or stability, uses zero assistance and full action authority,
+  and retains the strict lower-floor landing definition.
+- Focused tests: 38 passed. A 16-world warm-start update from integrated model
+  225 completed without NaNs and exposed dense landing rewards. The unchanged
+  model-225 reference battery produced 64/64 >=360°, 63/64 landing latches,
+  51/64 upright predicate, and 59/64 height predicate, but 0/64 low-angular-
+  speed predicate and 0 strict holds. Mean final rotation was 481.77°. This is
+  the desired repeatable real-trajectory braking failure, not a success claim.
+
+Reference capture command:
+
+```bash
+WARP_NUM_THREADS=12 .venv/bin/python scripts/eval_backflip.py \
+  logs/rsl_rl/microduck_backflip_pedestal_braking/2026-08-29_19-12-36_integrated-late-braking-v1-256/model_225.pt \
+  --task-id Mjlab-BackflipBrake-Pedestal-MicroDuck \
+  --num-envs 256 --seed 42 --start-mode standing --assist-scale 1 \
+  --snapshot-angle-deg 260 \
+  --snapshot-output src/mjlab_microduck/tasks/data/pedestal_model225_angle260_seed42.json \
+  --output results/research_pedestal_braking_v34_model225_assisted_256_snapshot_seed42.json
+```
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:

@@ -8,6 +8,7 @@ teach the landing half before the full jump is discovered.
 
 import math
 from copy import deepcopy
+from pathlib import Path
 
 from mjlab.managers import (
     CurriculumTermCfg,
@@ -38,6 +39,9 @@ from mjlab_microduck.tasks.microduck_roulade_env_cfg import (
 
 STAND_Z = 0.115
 EPISODE_LENGTH_S = 4.0
+REFERENCE_STATE_PATH = (
+    Path(__file__).parent / "data" / "pedestal_model225_angle260_seed42.json"
+)
 
 _LEG_JOINTS = [0, 1, 2, 3, 4, 9, 10, 11, 12, 13]
 
@@ -787,6 +791,21 @@ def make_microduck_backflip_pedestal_braking_env_cfg(play: bool = False):
     return cfg
 
 
+def make_microduck_backflip_reference_env_cfg(play: bool = False):
+    """Iterative-reference continuation from states the cube actor produced."""
+    cfg = make_microduck_backflip_pedestal_braking_env_cfg(play=play)
+    cfg.events["set_backflip_state"] = EventTermCfg(
+        func=microduck_mdp.reset_backflip_reference_state,
+        mode="reset",
+        params={
+            "reference_state_path": str(REFERENCE_STATE_PATH),
+            "landing_min_horizontal_distance": PEDESTAL_WIDTH / 2.0 + 0.04,
+        },
+    )
+    cfg.curriculum.pop("backflip_spawn_mix", None)
+    return cfg
+
+
 MicroduckBackflipRlCfg = deepcopy(MicroduckRouladeRlCfg)
 MicroduckBackflipRlCfg.experiment_name = "microduck_backflip"
 MicroduckBackflipRlCfg.run_name = "microduck_backflip"
@@ -815,3 +834,7 @@ MicroduckBackflipPedestalBrakingRlCfg.experiment_name = (
 MicroduckBackflipPedestalBrakingRlCfg.run_name = (
     "microduck_backflip_pedestal_braking"
 )
+
+MicroduckBackflipReferenceRlCfg = deepcopy(MicroduckBackflipRlCfg)
+MicroduckBackflipReferenceRlCfg.experiment_name = "microduck_backflip_reference"
+MicroduckBackflipReferenceRlCfg.run_name = "microduck_backflip_reference"

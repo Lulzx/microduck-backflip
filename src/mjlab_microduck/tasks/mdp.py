@@ -1,7 +1,9 @@
 """MDP functions for microduck tasks"""
 
+import json
 import math
 from dataclasses import dataclass as _dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -7526,6 +7528,7 @@ def _backflip_state(env: ManagerBasedRlEnv) -> tuple:
         env._backflip_assist_scale = 0.0
         env._backflip_assist_window_successes = 0
         env._backflip_assist_window_episodes = 0
+        env._backflip_phase_offset_s = z.clone()
         env._backflip_last_update_step = -1
     return env._backflip_accum, env._backflip_max, env._backflip_paid
 
@@ -7599,7 +7602,8 @@ def backflip_assist_observation(
     out = torch.zeros(env.num_envs, dim, device=env.device)
     if dim <= 0:
         return out
-    time_s = env.episode_length_buf.to(torch.float32) * env.step_dt
+    phase_offset = getattr(env, "_backflip_phase_offset_s", 0.0)
+    time_s = env.episode_length_buf.to(torch.float32) * env.step_dt + phase_offset
     x = time_s / max(float(timing_scale_s), 1e-6)
     out[:, 0] = x.pow(3) / (1.0 + x.pow(3))
     if dim > 1:
@@ -8051,6 +8055,115 @@ def reset_backflip_state(
     env._backflip_stable_latch[env_ids] = False
     env._backflip_assist_eligible[env_ids] = ~(is_mid | is_recovery)
     env._backflip_assist_initialized[env_ids] = True
+    env._backflip_phase_offset_s[env_ids] = 0.0
+
+
+_BACKFLIP_REFERENCE_CACHE: dict[str, dict[str, torch.Tensor]] = {}
+
+
+def _load_backflip_reference_states(path: str) -> dict[str, torch.Tensor]:
+    resolved = str(Path(path).expanduser().resolve())
+    cached = _BACKFLIP_REFERENCE_CACHE.get(resolved)
+    if cached is not None:
+        return cached
+    payload = json.loads(Path(resolved).read_text())
+    records = payload.get("snapshots", [])
+    if not records:
+        raise ValueError(f"No backflip snapshots in {resolved}")
+    cached = {
+        "qpos": torch.tensor(
+            [record["qpos_local"] for record in records], dtype=torch.float32
+        ),
+        "qvel": torch.tensor(
+            [record["qvel"] for record in records], dtype=torch.float32
+        ),
+        "rotation": torch.tensor(
+            [record["rotation_rad"] for record in records], dtype=torch.float32
+        ),
+        "phase_time": torch.tensor(
+            [record["time_s"] for record in records], dtype=torch.float32
+        ),
+    }
+    _BACKFLIP_REFERENCE_CACHE[resolved] = cached
+    return cached
+
+
+def reset_backflip_reference_state(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    reference_state_path: str,
+    landing_min_horizontal_distance: float = 0.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+):
+    """Reset from full simulator states captured on the real launch policy.
+
+    Unlike a hand-authored ballistic reset, this preserves the launch actor's
+    complete joint pose and velocity distribution. Root positions in the JSON
+    are terrain-origin-relative, allowing the same records to be sampled into
+    any vectorized world. The observation phase is offset to the captured
+    launch time so the phase-conditioned actor sees a continuous episode.
+    """
+    if env_ids is None or len(env_ids) == 0:
+        return
+    env_ids = env_ids.to(env.device, dtype=torch.long)
+    # Initialize every potential, latch, and assist field through the normal
+    # reset path before replacing the approximate mid-flight state.
+    reset_backflip_state(
+        env,
+        env_ids,
+        asset_cfg=asset_cfg,
+        standing_prob=0.0,
+        crouch_prob=0.0,
+        midflight_prob=1.0,
+        recovery_prob=0.0,
+        midflight_angle_range=(math.radians(260.0), math.radians(261.0)),
+        midflight_z_range=(0.40, 0.41),
+        midflight_omega_range=(15.0, 16.0),
+        midflight_vz_range=(1.0, 1.01),
+        joint_noise_std=0.0,
+        initial_assist_scale=0.0,
+        landing_min_horizontal_distance=landing_min_horizontal_distance,
+    )
+    references = _load_backflip_reference_states(reference_state_path)
+    choice = torch.randint(
+        references["qpos"].shape[0],
+        (len(env_ids),),
+        device=env.device,
+    )
+    qpos = references["qpos"][choice.cpu()].to(env.device).clone()
+    qvel = references["qvel"][choice.cpu()].to(env.device).clone()
+    if qpos.shape[1] != env.sim.data.qpos.shape[1]:
+        raise ValueError(
+            f"Reference qpos width {qpos.shape[1]} does not match sim "
+            f"width {env.sim.data.qpos.shape[1]}"
+        )
+    if qvel.shape[1] != env.sim.data.qvel.shape[1]:
+        raise ValueError(
+            f"Reference qvel width {qvel.shape[1]} does not match sim "
+            f"width {env.sim.data.qvel.shape[1]}"
+        )
+    qpos[:, :3] += env.scene.terrain.env_origins[env_ids]
+    env.sim.data.qpos[env_ids] = qpos
+    env.sim.data.qvel[env_ids] = qvel
+
+    progress = references["rotation"][choice.cpu()].to(env.device)
+    phase_time = references["phase_time"][choice.cpu()].to(env.device)
+    env._backflip_accum[env_ids] = progress
+    env._backflip_max[env_ids] = progress
+    env._backflip_paid[env_ids] = progress
+    env._backflip_max_z[env_ids] = qpos[:, 2]
+    env._backflip_paid_z[env_ids] = qpos[:, 2]
+    env._backflip_had_support[env_ids] = True
+    env._backflip_airborne_latch[env_ids] = True
+    env._backflip_flight_ended_latch[env_ids] = False
+    env._backflip_landed_latch[env_ids] = False
+    env._backflip_stable_steps[env_ids] = 0
+    env._backflip_max_stable_steps[env_ids] = 0
+    env._backflip_paid_stable_steps[env_ids] = 0
+    env._backflip_stable_latch[env_ids] = False
+    env._backflip_assist_eligible[env_ids] = False
+    env._backflip_assist_initialized[env_ids] = True
+    env._backflip_phase_offset_s[env_ids] = phase_time
 
 
 def backflip_rotation_progress(
