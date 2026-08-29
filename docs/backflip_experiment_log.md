@@ -358,6 +358,24 @@ WARP_NUM_THREADS=12 .venv/bin/microduck-train \
 Run directory:
 `logs/rsl_rl/microduck_backflip_recovery/2026-08-29_18-07-19_impact-recovery-v1-model50-warmstart-256`.
 
+**2026-08-29 18:13 IST — recovery model 100 and composed visual probe.**
+
+- Recovery-only, initial impact stage, seed 42: 59/64 (92.1875%) strict
+  0.5-second holds. Median longest strict hold 0.63 s, maximum 1.10 s, no
+  nonfinite state. This validates the easy specialist stage only.
+- Composed pedestal launch model 200 + recovery model 100: recovery activated
+  in 3/64 valid-contact worlds, but strict full-attempt holds remained 0/64.
+  The actual touchdown distribution is still outside the specialist's first
+  stage; training continues toward the higher-impact stages.
+- Environment 31 was rendered as the current composed diagnostic. It stands on
+  the cube, clears it, rotates backward and contacts the lower floor, then
+  collapses. It is explicitly a failure video, not a successful backflip.
+- Evidence:
+  `results/research_v28_impact_recovery_model100_seed42.json`,
+  `results/research_pedestal_v28_hierarchical_launch200_recovery100_seed42.json`,
+  and
+  `results/videos/v28-pedestal-hierarchical-launch200-recovery100-env31/backflip-model_200-standing-step-0.mp4`.
+
 ## Logging protocol for subsequent entries
 
 For each new checkpoint or variant, append:
